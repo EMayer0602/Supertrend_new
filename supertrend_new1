@@ -103,71 +103,93 @@ class TradingSystem:
     def generate_trading_lists(self, df, symbol):
         long_trades = []
         short_trades = []
-        current_position = None
-        entry_price = None
-        entry_index = None
-        entry_date = None
+        long_current_position = None
+        short_current_position = None
+        long_entry_price = None
+        short_entry_price = None
 
-        for i, row in df.iterrows():
-            close_price = row[f'Close_{symbol}']
-            supertrend = row['Supertrend']
+        for i in range(1, len(df)):
+            close_price = df[f'Close_{symbol}'].iloc[i]
+            supertrend = df['Supertrend'].iloc[i]
+            previous_close_price = df[f'Close_{symbol}'].iloc[i-1]
+            previous_supertrend = df['Supertrend'].iloc[i-1]
 
-            if supertrend < close_price:
-                if current_position == 'Short':
+            # Opening long position and covering short position
+            if previous_supertrend > previous_close_price and supertrend < close_price:
+                if short_current_position:
                     exit_price = close_price
                     exit_index = i
-                    exit_date = row.name
-                    profit_loss = (entry_price - exit_price) / entry_price
+                    exit_date = df.index[i]
+                    profit_loss = (short_entry_price - exit_price) / short_entry_price
                     short_trades.append({
-                        'entry_date': entry_date,
-                        'entry_price': entry_price,
+                        'entry_date': short_current_position['entry_date'],
+                        'entry_price': short_entry_price,
                         'exit_date': exit_date,
                         'exit_price': exit_price,
                         'profit_loss': profit_loss,
-                        'entry_index': entry_index,
+                        'entry_index': short_current_position['entry_index'],
                         'exit_index': exit_index,
                         'symbol': symbol,
                         'type': 'Short'
                     })
-                    current_position = None
-                if current_position is None:
-                    current_position = 'Long'
-                    entry_price = close_price
-                    entry_index = i
-                    entry_date = row.name
+                    short_current_position = None
 
-            elif supertrend > close_price:
-                if current_position == 'Long':
+                if not long_current_position:
+                    long_current_position = {
+                        'entry_date': df.index[i],
+                        'entry_index': i
+                    }
+                    long_entry_price = close_price
+
+            # Closing long position and opening short position
+            elif previous_supertrend < previous_close_price and supertrend >= close_price:
+                if long_current_position:
                     exit_price = close_price
                     exit_index = i
-                    exit_date = row.name
-                    profit_loss = (exit_price - entry_price) / entry_price
+                    exit_date = df.index[i]
+                    profit_loss = (exit_price - long_entry_price) / long_entry_price
                     long_trades.append({
-                        'entry_date': entry_date,
-                        'entry_price': entry_price,
+                        'entry_date': long_current_position['entry_date'],
+                        'entry_price': long_entry_price,
                         'exit_date': exit_date,
                         'exit_price': exit_price,
                         'profit_loss': profit_loss,
-                        'entry_index': entry_index,
+                        'entry_index': long_current_position['entry_index'],
                         'exit_index': exit_index,
                         'symbol': symbol,
                         'type': 'Long'
                     })
-                    current_position = None
-                if current_position is None:
-                    current_position = 'Short'
-                    entry_price = close_price
-                    entry_index = i
-                    entry_date = row.name
+                    long_current_position = None
 
-        if current_position == 'Short':
-            short_trades.append({
-                'entry_date': entry_date,
-                'entry_price': entry_price,
+                if not short_current_position:
+                    short_current_position = {
+                        'entry_date': df.index[i],
+                        'entry_index': i
+                    }
+                    short_entry_price = close_price
+
+        # Ensure any open positions are closed at the end of the data
+        if long_current_position:
+            long_trades.append({
+                'entry_date': long_current_position['entry_date'],
+                'entry_price': long_entry_price,
                 'exit_date': df.index[-1],
                 'exit_price': df[f'Close_{symbol}'].iloc[-1],
-                'profit_loss': (entry_price - df[f'Close_{symbol}'].iloc[-1]) / entry_price,
-                'entry_index': entry_index,
+                'profit_loss': (df[f'Close_{symbol}'].iloc[-1] - long_entry_price) / long_entry_price,
+                'entry_index': long_current_position['entry_index'],
+                'exit_index': len(df) - 1,
+                'symbol': symbol,
+                'type': 'Long'
+            })
+
+        if short_current_position:
+            short_trades.append({
+                'entry_date': short_current_position['entry_date'],
+                'entry_price': short_entry_price,
+                'exit_date': df.index[-1],
+                'exit_price': df[f'Close_{symbol}'].iloc[-1],
+                'profit_loss': (short_entry_price - df[f'Close_{symbol}'].iloc[-1]) / short_entry_price,
+                'entry_index': short_current_position['entry_index'],
                 'exit_index': len(df) - 1,
                 'symbol': symbol,
                 'type': 'Short'
@@ -175,14 +197,21 @@ class TradingSystem:
 
         return long_trades, short_trades
 
-    def calculate_equity_curve(self, df, trades):
+    def calculate_equity_curve(self, df, trades, start_date):
         if not trades:
             return pd.Series(self.initial_capital, index=df.index)
-        equity_curve = pd.Series(index=df.index, dtype=float)
-        equity_curve.iloc[0] = self.initial_capital
+        
+        equity_curve = pd.Series(self.initial_capital, index=df.index, dtype=float)
         current_capital = self.initial_capital
         current_position = None
+
+        start_date = pd.Timestamp(start_date)
+        
         for date in df.index:
+            if date < start_date:
+                equity_curve.loc[date] = self.initial_capital
+                continue
+            
             if current_position:
                 if current_position["type"] == "Long":
                     daily_return = df.loc[date, f'Close_{current_position["symbol"]}'] / df.loc[current_position["entry_date"], f'Close_{current_position["symbol"]}'] - 1
@@ -192,6 +221,7 @@ class TradingSystem:
                 equity_curve.loc[date] = current_capital
             else:
                 equity_curve.loc[date] = current_capital
+
             for trade in trades:
                 if pd.Timestamp(date) == pd.Timestamp(trade['entry_date']):
                     current_position = {
@@ -202,59 +232,8 @@ class TradingSystem:
                     }
                 elif pd.Timestamp(date) == pd.Timestamp(trade['exit_date']) and current_position:
                     current_position = None
+
         return equity_curve.ffill().bfill()
-
-    def _add_equity_curve(self, fig, equity_curve, name, color, row, col):
-        fig.add_trace(
-            go.Scatter(
-                x=equity_curve.index,
-                y=equity_curve.values,
-                name=name,
-                line=dict(color=color)
-            ),
-            row=row, col=col
-        )
-
-    def calculate_trade_statistics(self, trades, equity_curve):
-        if not trades:
-            return {
-                "Total Trades": 0,
-                "Winning Trades": 0,
-                "Losing Trades": 0,
-                "Win Rate": 0.0,
-                "Average Profit": 0.0,
-                "Average Loss": 0.0,
-                "Profit Factor": 0.0,
-                "Total Return": 0.0,
-                "Max Drawdown": 0.0,
-                "Sharpe Ratio": 0.0
-            }
-        total_trades = len(trades)
-        winning_trades = len([t for t in trades if t['profit_loss'] > 0])
-        losing_trades = len([t for t in trades if t['profit_loss'] <= 0])
-        profits = [t['profit_loss'] for t in trades if t['profit_loss'] > 0]
-        losses = [t['profit_loss'] for t in trades if t['profit_loss'] <= 0]
-        avg_profit = np.mean(profits) if profits else 0
-        avg_loss = np.mean(losses) if losses else 0
-        total_profit = sum(profits)
-        total_loss = sum(losses)
-        win_rate = winning_trades / total_trades if total_trades > 0 else 0
-        profit_factor = abs(total_profit / total_loss) if total_loss != 0 else float('inf')
-        total_return = (equity_curve.iloc[-1] - self.initial_capital) / self.initial_capital
-        max_drawdown = abs((equity_curve - equity_curve.expanding().max()).min())
-        sharpe_ratio = np.sqrt(252) * (equity_curve.pct_change().dropna().mean() / equity_curve.pct_change().dropna().std()) if len(equity_curve.pct_change().dropna()) > 1 else 0
-        return {
-            "Total Trades": total_trades,
-            "Winning Trades": winning_trades,
-            "Losing Trades": losing_trades,
-            "Avg Profit": avg_profit,
-            "Avg Loss": avg_loss,
-            "Win Rate": win_rate,
-            "Profit Factor": profit_factor,
-            "Total Return": total_return,
-            "Max Drawdown": max_drawdown,
-            "Sharpe Ratio": sharpe_ratio
-        }
 
     def plot_results(self, df, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, symbol):
         plot_df = df.iloc[15:]
@@ -443,6 +422,48 @@ class TradingSystem:
             ),
             row=row, col=col
         )
+
+    def calculate_trade_statistics(self, trades, equity_curve):
+        if not trades:
+            return {
+                "Total Trades": 0,
+                "Winning Trades": 0,
+                "Losing Trades": 0,
+                "Win Rate": 0.0,
+                "Average Profit": 0.0,
+                "Average Loss": 0.0,
+                "Profit Factor": 0.0,
+                "Total Return": 0.0,
+                "Max Drawdown": 0.0,
+                "Sharpe Ratio": 0.0
+            }
+        total_trades = len(trades)
+        winning_trades = len([t for t in trades if t['profit_loss'] > 0])
+        losing_trades = len([t for t in trades if t['profit_loss'] <= 0])
+        profits = [t['profit_loss'] for t in trades if t['profit_loss'] > 0]
+        losses = [t['profit_loss'] for t in trades if t['profit_loss'] <= 0]
+        avg_profit = np.mean(profits) if profits else 0
+        avg_loss = np.mean(losses) if losses else 0
+        total_profit = sum(profits)
+        total_loss = sum(losses)
+        win_rate = winning_trades / total_trades if total_trades > 0 else 0
+        profit_factor = abs(total_profit / total_loss) if total_loss != 0 else float('inf')
+        total_return = (equity_curve.iloc[-1] - self.initial_capital) / self.initial_capital
+        max_drawdown = abs((equity_curve - equity_curve.expanding().max()).min())
+        sharpe_ratio = np.sqrt(252) * (equity_curve.pct_change().dropna().mean() / equity_curve.pct_change().dropna().std()) if len(equity_curve.pct_change().dropna()) > 1 else 0
+        return {
+            "Total Trades": total_trades,
+            "Winning Trades": winning_trades,
+            "Losing Trades": losing_trades,
+            "Avg Profit": avg_profit,
+            "Avg Loss": avg_loss,
+            "Win Rate": win_rate,
+            "Profit Factor": profit_factor,
+            "Total Return": total_return,
+            "Max Drawdown": max_drawdown,
+            "Sharpe Ratio": sharpe_ratio
+        }
+
     def print_statistics(self, stats, trade_type=""):
         print(f"\n{trade_type} Trading Statistics:")
         print("=" * 50)
@@ -460,7 +481,7 @@ class TradingSystem:
                 print(f"{key}:\n{formatted_series}")
             else:
                 print(f"{key}: {value}")
-    
+
 def main():
     stock_symbol = "BTC-EUR"
     system = TradingSystem()
@@ -470,14 +491,14 @@ def main():
     stock_data = yf.download(stock_symbol, start=start_date, end=end_date)
     print("Available columns in stock_data:")
     print(stock_data.columns)
-    
+
     # Flatten the DataFrame to handle MultiIndex columns
     stock_data = flatten_dataframe(stock_data)
-    
+
     close_col = f'Close_{stock_symbol}'
     high_col = f'High_{stock_symbol}'
     low_col = f'Low_{stock_symbol}'
-    
+
     if 'TrendUp' not in stock_data.columns:
         try:
             stock_data['ShortMA'] = stock_data[close_col].rolling(window=20).mean()
@@ -505,28 +526,31 @@ def main():
     stock_data['ST_Signal'] = st_signal
     
     long_trades, short_trades = system.generate_trading_lists(stock_data, stock_symbol)
-    
+
     # Calculate equity curves based on Supertrend trades
-    long_equity = system.calculate_equity_curve(stock_data, long_trades)
-    short_equity = system.calculate_equity_curve(stock_data, short_trades)
-    
+    long_equity = system.calculate_equity_curve(stock_data, long_trades, '2023-05-21')
+    short_equity = system.calculate_equity_curve(stock_data, short_trades, '2023-06-19')
+
+    # Ensure equity curves remain constant until the first trade date
+    combined_equity = long_equity.combine_first(short_equity) - system.initial_capital + system.initial_capital
+
     # Calculate buy and hold equity
     buy_and_hold_equity = (stock_data[close_col] / stock_data[close_col].iloc[0]) * system.initial_capital
-    
+
     print("Long Trades:")
     print(pd.DataFrame(long_trades).to_string(index=False))
     print("\nShort Trades:")
     print(pd.DataFrame(short_trades).to_string(index=False))
-    
+
     long_stats = system.calculate_trade_statistics(long_trades, long_equity)
     short_stats = system.calculate_trade_statistics(short_trades, short_equity)
     system.print_statistics(long_stats, "Long")
     system.print_statistics(short_stats, "Short")
-    
+
     print("Candlestick Data for Plot:")
     stock_data_flat = flatten_dataframe(stock_data)  # Ensure DataFrame is flattened for plotting
     fig = system.plot_results(stock_data_flat, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, stock_symbol)
-    
+
     fig.show()
     print("Stock Data Null Values:", stock_data.isnull().sum())
     print("Candlestick Chart Data:")
