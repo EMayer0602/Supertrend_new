@@ -344,29 +344,29 @@ class TradingSystem:
             ),
             row=1, col=1
         )
-    if 'Aroon_Up' in plot_df.columns and 'Aroon_Down' in plot_df.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=plot_df.index,
-                y=plot_df['Aroon_Up'],
-                mode='lines',
-                name='Aroon Up',
-                line=dict(color='green', width=2)
-            ),
-            row=2, col=1
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=plot_df.index,
-                y=plot_df['Aroon_Down'],
-                mode='lines',
-                name='Aroon Down',
-                line=dict(color='red', width=2)
-            ),
-            row=2, col=1
-        )
-    else:
-        print("Spalten 'Aroon_Up' oder 'Aroon_Down' fehlen im DataFrame.")
+        if 'Aroon_Up' in plot_df.columns and 'Aroon_Down' in plot_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_df.index,
+                    y=plot_df['Aroon_Up'],
+                    mode='lines',
+                    name='Aroon Up',
+                    line=dict(color='green', width=2)
+                ),
+                row=2, col=1
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_df.index,
+                    y=plot_df['Aroon_Down'],
+                    mode='lines',
+                    name='Aroon Down',
+                    line=dict(color='red', width=2)
+                ),
+                row=2, col=1
+            )
+        else:
+            print("Spalten 'Aroon_Up' oder 'Aroon_Down' fehlen im DataFrame.")
         
         # ADX-Plot
         fig.add_trace(
@@ -527,8 +527,9 @@ class TradingSystem:
 
 def main():
     stock_symbol = "BTC-EUR"
-    system = TradingSystem()
+    system = TradingSystem()  # Instanziierung der TradingSystem-Klasse
     print(stock_symbol)
+
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365)
 
@@ -602,18 +603,23 @@ def main():
     stock_data = calculate_aroon_adx(stock_data, high_col, low_col, close_col)
 
     # Debugging: Spalten und Werte
-    print("Spalten in plot_df:", plot_df.columns)
+    aroon_up_col = f'Aroon_Up_{stock_symbol}'
+    aroon_down_col = f'Aroon_Down_{stock_symbol}'
+
+    print("Nach Berechnung von Aroon und ADX:")
+    print(stock_data[[aroon_up_col, aroon_down_col, 'ADX']].head())
+'''    print("Spalten in stock_data:", stock_data.columns)
     print("Nach Berechnung von Aroon und ADX:")
     print(stock_data[['Aroon_Up', 'Aroon_Down', 'ADX']].head())
     print("Spalten im DataFrame nach Berechnung von Aroon und ADX:")
     print(stock_data.columns)
     print("Daten (Aroon_Up, Aroon_Down):")
     print(stock_data[['Aroon_Up', 'Aroon_Down']].head())
-
+'''
     # Plot der Ergebnisse
-    print("Erstelle Plot...")
-    fig = system.plot_results(stock_data, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, stock_symbol)
-    fig.show()
+print("Erstelle Plot...")
+fig = system.plot_results(stock_data, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, stock_symbol)
+fig.show()
 
 import plotly.io as pio
 pio.renderers.default = 'browser'
