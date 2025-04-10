@@ -1,3 +1,4 @@
+
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
@@ -25,6 +26,8 @@ def get_supertrend(high, low, close, period, multiplier):
     final_upper = pd.Series(0.0, index=close.index)
     final_lower = pd.Series(0.0, index=close.index)
     supertrend = pd.Series(0.0, index=close.index)
+
+    # Calculate final upper and lower bands
     for i in range(period, len(close)):
         if basic_upper.iloc[i] < final_upper.iloc[i-1] or close.iloc[i-1] > final_upper.iloc[i-1]:
             final_upper.iloc[i] = basic_upper.iloc[i]
@@ -34,6 +37,8 @@ def get_supertrend(high, low, close, period, multiplier):
             final_lower.iloc[i] = basic_lower.iloc[i]
         else:
             final_lower.iloc[i] = final_lower.iloc[i-1]
+
+    # Determine Supertrend values
     for i in range(period, len(close)):
         if supertrend.iloc[i-1] == final_upper.iloc[i-1] and close.iloc[i] <= final_upper.iloc[i]:
             supertrend.iloc[i] = final_upper.iloc[i]
@@ -45,24 +50,29 @@ def get_supertrend(high, low, close, period, multiplier):
             supertrend.iloc[i] = final_upper.iloc[i]
         else:
             supertrend.iloc[i] = 0.0
-    upt = []
-    dt = []
-    Close = close.iloc[period:]
-    for i in range(len(Close)):
-        if Close.iloc[i] > supertrend.iloc[period+i]:
-            upt.append(supertrend.iloc[period+i])
-            dt.append(np.nan)
-        elif Close.iloc[i] < supertrend.iloc[period+i]:
-            upt.append(np.nan)
-            dt.append(supertrend.iloc[period+i])
-        else:
-            upt.append(np.nan)
-            dt.append(np.nan)
-    st = pd.Series(supertrend.iloc[period:].values, index=Close.index)
-    upt = pd.Series(upt, index=Close.index)
-    dt = pd.Series(dt, index=Close.index)
-    return st, upt, dt
 
+    # Prepare combined Supertrend and corresponding colors
+    combined = []
+    colors = []  # Colors for combined Supertrend
+    Close = close.iloc[period:]
+
+    for i in range(len(Close)):
+        if Close.iloc[i] > supertrend.iloc[period + i]:
+            combined.append(supertrend.iloc[period + i])
+            colors.append('green')  # Long trend
+        elif Close.iloc[i] < supertrend.iloc[period + i]:
+            combined.append(supertrend.iloc[period + i])
+            colors.append('red')  # Short trend
+        else:
+            combined.append(np.nan)  # No trend
+            colors.append('gray')  # Neutral color
+
+    st = pd.Series(supertrend.iloc[period:].values, index=Close.index)
+    combined = pd.Series(combined, index=Close.index)
+    colors = pd.Series(colors, index=Close.index)  # Series containing color information
+
+    return st, combined, colors
+    
 def implement_st_strategy(prices, st):
     buy_price = []
     sell_price = []
@@ -346,7 +356,7 @@ class TradingSystem:
             ),
             row=1, col=1
         )
-    
+''''    
         # Add Supertrend Long (green)
         fig.add_trace(
             go.Scatter(
@@ -372,8 +382,20 @@ class TradingSystem:
             ),
             row=1, col=1
         )
-    
-        # Add Long trading icons (Entry and Exit)
+'''
+        # Plot Combined Supertrend with color-coding
+        fig.add_trace(
+            go.Scatter(
+                x=plot_df.index,
+                y=plot_df['CombinedSupertrend'],
+                mode='lines',
+                name='Combined Supertrend',
+                line=dict(width=2),
+                marker=dict(color=plot_df['SupertrendColors'])  # Use the color column for dynamic coloring
+            ),
+            row=1, col=1
+        )
+# Add Long trading icons (Entry and Exit)
         if long_trades:
             long_entries = [trade['entry_date'] for trade in long_trades]
             long_entry_prices = [trade['entry_price'] for trade in long_trades]
@@ -541,18 +563,6 @@ class TradingSystem:
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
         )
         return fig
-    
-    def _add_equity_curve(self, fig, equity_curve, name, color, row, col):
-        fig.add_trace(
-            go.Scatter(
-                x=equity_curve.index,
-                y=equity_curve.values,
-                name=name,
-                line=dict(color=color)
-            ),
-            row=row, col=col
-        )
-
     def calculate_trade_statistics(self, trades, equity_curve):
         if not trades:
             return {
@@ -647,13 +657,15 @@ def main():
 
     if 'TrendDown' not in stock_data.columns:
         stock_data['TrendDown'] = ~stock_data['TrendUp']
+    # Calculate Supertrend and Combined Supertrend
+    st, combined_supertrend, supertrend_colors = get_supertrend(
+        stock_data[high_col], stock_data[low_col], stock_data[close_col], 7, 3
+    )
 
-    # Berechnung von Supertrend
-    st, s_upt, st_dt = get_supertrend(stock_data[high_col], stock_data[low_col], stock_data[close_col], 7, 3)
+    # Add to the DataFrame
     stock_data['Supertrend'] = st
-    stock_data['SupertrendUp'] = s_upt
-    stock_data['SupertrendDown'] = st_dt
-
+    stock_data['CombinedSupertrend'] = combined_supertrend
+    stock_data['SupertrendColors'] = supertrend_colors  # Add color information
     # Implementierung der Supertrend-Strategie
     buy_price, sell_price, st_signal = implement_st_strategy(stock_data[close_col], stock_data['Supertrend'])
     stock_data['Buy_Signal_Price'] = buy_price
