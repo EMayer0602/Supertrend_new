@@ -1,4 +1,3 @@
-
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
@@ -107,15 +106,12 @@ def implement_st_strategy(prices, st):
 
 def calculate_aroon_adx(df, high_col, low_col, close_col):
     try:
-        # Aroon-Indikator berechnen
+        # Berechnung des Aroon-Indikators
         aroon_indicator = AroonIndicator(high=df[high_col], low=df[low_col], window=25)
-#        df['Aroon_Up'] = aroon_indicator.aroon_up()
-#        df['Aroon_Down'] = aroon_indicator.aroon_down()
-
         df[f'Aroon_Up_{close_col.split("_")[1]}'] = aroon_indicator.aroon_up()
         df[f'Aroon_Down_{close_col.split("_")[1]}'] = aroon_indicator.aroon_down()
-        
-        # ADX-Indikator berechnen
+
+        # Berechnung des ADX-Indikators
         adx_indicator = ADXIndicator(high=df[high_col], low=df[low_col], close=df[close_col], window=14)
         df['ADX'] = adx_indicator.adx()
         df['ADX_Pos_DI'] = adx_indicator.adx_pos()
@@ -124,9 +120,7 @@ def calculate_aroon_adx(df, high_col, low_col, close_col):
         print("Berechnung von Aroon und ADX erfolgreich abgeschlossen.")
     except Exception as e:
         print(f"Fehler bei der Berechnung von Aroon und ADX: {e}")
-
     return df
-
 class TradingSystem:
     def __init__(self, initial_capital=10000, position_size=2.0, stop_loss_pct=0.92, transaction_cost=0.001):
         self.initial_capital = initial_capital
@@ -320,23 +314,23 @@ class TradingSystem:
             "Max Drawdown": max_drawdown,
             "Sharpe Ratio": sharpe_ratio
         }
-            
+                    
     def plot_results(self, df, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, symbol):
         # Prepare data for plots
-        plot_df = df.iloc[15:]  # Skip first 15 rows to improve plot clarity
+        plot_df = df.iloc[15:]  # Skip first 15 rows for clarity
         plot_long_equity = long_equity.iloc[15:]
         plot_short_equity = short_equity.iloc[15:]
         plot_buy_and_hold_equity = buy_and_hold_equity.iloc[15:]
-        combined_equity = plot_long_equity + plot_short_equity - self.initial_capital  # Combined equity
-        combined_equity = combined_equity.ffill().bfill()  # Fill any gaps in the curve
+        combined_equity = plot_long_equity + plot_short_equity - self.initial_capital
+        combined_equity = combined_equity.ffill().bfill()  # Fill gaps in combined equity
     
-        # Create subplot
+        # Create subplots
         fig = make_subplots(
-            rows=4, cols=1,  # Four rows: Price, Aroon, ADX, Equity
+            rows=4, cols=1,  # Four rows: Price/Supertrend, Aroon, ADX, Equity
             shared_xaxes=True,
             vertical_spacing=0.05,
             subplot_titles=(
-                f'{symbol} Price, Supertrend and Trade Signals',
+                f'{symbol} Price, Combined Supertrend and Trade Signals',
                 'Aroon Indicators',
                 'ADX Indicator',
                 f'{symbol} Equity Curves'
@@ -344,7 +338,7 @@ class TradingSystem:
             row_heights=[0.4, 0.2, 0.2, 0.2]
         )
     
-        # Candlestick chart with Supertrend
+        # Candlestick chart
         fig.add_trace(
             go.Candlestick(
                 x=plot_df.index,
@@ -356,46 +350,25 @@ class TradingSystem:
             ),
             row=1, col=1
         )
-''''    
-        # Add Supertrend Long (green)
-        fig.add_trace(
-            go.Scatter(
-                x=plot_df.index,
-                y=plot_df['SupertrendUp'],
-                mode='lines',
-                name='Supertrend Long',
-                line=dict(color='green', width=2),
-                connectgaps=True  # Ensure there are no gaps in the curve
-            ),
-            row=1, col=1
-        )
     
-        # Add Supertrend Short (red)
-        fig.add_trace(
-            go.Scatter(
-                x=plot_df.index,
-                y=plot_df['SupertrendDown'],
-                mode='lines',
-                name='Supertrend Short',
-                line=dict(color='red', width=2),
-                connectgaps=True  # Ensure there are no gaps in the curve
-            ),
-            row=1, col=1
-        )
-'''
-        # Plot Combined Supertrend with color-coding
-        fig.add_trace(
-            go.Scatter(
-                x=plot_df.index,
-                y=plot_df['CombinedSupertrend'],
-                mode='lines',
-                name='Combined Supertrend',
-                line=dict(width=2),
-                marker=dict(color=plot_df['SupertrendColors'])  # Use the color column for dynamic coloring
-            ),
-            row=1, col=1
-        )
-# Add Long trading icons (Entry and Exit)
+        # Combined Supertrend with dynamic coloring
+        for i in range(len(plot_df) - 1):
+            fig.add_trace(
+                go.Scatter(
+                    x=[plot_df.index[i], plot_df.index[i + 1]],
+                    y=[plot_df['CombinedSupertrend'].iloc[i], plot_df['CombinedSupertrend'].iloc[i + 1]],
+                    mode='lines',
+                    line=dict(
+                        color='green' if plot_df['SupertrendColors'].iloc[i] == 'green' else 'red',
+                        width=2
+                    ),
+                    name='Combined Supertrend',
+                    showlegend=(i == 0)  # Only show legend once
+                ),
+                row=1, col=1
+            )
+    
+        # Long trade markers (Entry and Exit)
         if long_trades:
             long_entries = [trade['entry_date'] for trade in long_trades]
             long_entry_prices = [trade['entry_price'] for trade in long_trades]
@@ -405,7 +378,7 @@ class TradingSystem:
             fig.add_trace(
                 go.Scatter(
                     x=long_entries,
-                    y=[price * 1.01 for price in long_entry_prices],  # 1% offset
+                    y=[price * 1.01 for price in long_entry_prices],
                     mode='markers',
                     name='Long Entry',
                     marker=dict(symbol='triangle-up', size=10, color='green')
@@ -415,7 +388,7 @@ class TradingSystem:
             fig.add_trace(
                 go.Scatter(
                     x=long_exits,
-                    y=[price * 1.01 for price in long_exit_prices],  # 1% offset
+                    y=[price * 1.01 for price in long_exit_prices],
                     mode='markers',
                     name='Long Exit',
                     marker=dict(symbol='triangle-down', size=10, color='red')
@@ -423,7 +396,7 @@ class TradingSystem:
                 row=1, col=1
             )
     
-        # Add Short trading icons (Entry and Exit)
+        # Short trade markers (Entry and Exit)
         if short_trades:
             short_entries = [trade['entry_date'] for trade in short_trades]
             short_entry_prices = [trade['entry_price'] for trade in short_trades]
@@ -433,7 +406,7 @@ class TradingSystem:
             fig.add_trace(
                 go.Scatter(
                     x=short_entries,
-                    y=[price * 0.99 for price in short_entry_prices],  # -1% offset
+                    y=[price * 0.99 for price in short_entry_prices],
                     mode='markers',
                     name='Short Entry',
                     marker=dict(symbol='triangle-down', size=10, color='blue')
@@ -443,7 +416,7 @@ class TradingSystem:
             fig.add_trace(
                 go.Scatter(
                     x=short_exits,
-                    y=[price * 0.99 for price in short_exit_prices],  # -1% offset
+                    y=[price * 0.99 for price in short_exit_prices],
                     mode='markers',
                     name='Short Exit',
                     marker=dict(symbol='triangle-up', size=10, color='black')
@@ -451,32 +424,31 @@ class TradingSystem:
                 row=1, col=1
             )
     
-        # Add Aroon Indicators
+        # Aroon indicators
         aroon_up_col = f'Aroon_Up_{symbol}'
         aroon_down_col = f'Aroon_Down_{symbol}'
-        if aroon_up_col in plot_df.columns and aroon_down_col in plot_df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=plot_df.index,
-                    y=plot_df[aroon_up_col],
-                    mode='lines',
-                    name='Aroon Up',
-                    line=dict(color='green', width=2)
-                ),
-                row=2, col=1
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=plot_df.index,
-                    y=plot_df[aroon_down_col],
-                    mode='lines',
-                    name='Aroon Down',
-                    line=dict(color='red', width=2)
-                ),
-                row=2, col=1
-            )
+        fig.add_trace(
+            go.Scatter(
+                x=plot_df.index,
+                y=plot_df[aroon_up_col],
+                mode='lines',
+                name='Aroon Up',
+                line=dict(color='green', width=2)
+            ),
+            row=2, col=1
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=plot_df.index,
+                y=plot_df[aroon_down_col],
+                mode='lines',
+                name='Aroon Down',
+                line=dict(color='red', width=2)
+            ),
+            row=2, col=1
+        )
     
-        # Add ADX and DI Indicators
+        # ADX indicators
         fig.add_trace(
             go.Scatter(
                 x=plot_df.index,
@@ -508,7 +480,7 @@ class TradingSystem:
             row=3, col=1
         )
     
-        # Add Equity Curves
+        # Equity curves
         fig.add_trace(
             go.Scatter(
                 x=plot_long_equity.index,
@@ -545,7 +517,7 @@ class TradingSystem:
                 y=plot_buy_and_hold_equity.values,
                 mode='lines',
                 name='Buy and Hold Equity',
-                line=dict(color='orange', width=2, dash='dash')
+                line=dict(color='orange', dash='dash')
             ),
             row=4, col=1
         )
@@ -553,56 +525,10 @@ class TradingSystem:
         # Update layout
         fig.update_layout(
             title=f'Trading System Results for {symbol}',
-            xaxis=dict(rangeslider=dict(visible=False)),
-            yaxis_title='Price',
-            yaxis2_title='Aroon',
-            yaxis3_title='ADX',
-            yaxis4_title='Equity',
             height=1200,
-            showlegend=True,
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+            showlegend=True
         )
         return fig
-    def calculate_trade_statistics(self, trades, equity_curve):
-        if not trades:
-            return {
-                "Total Trades": 0,
-                "Winning Trades": 0,
-                "Losing Trades": 0,
-                "Win Rate": 0.0,
-                "Average Profit": 0.0,
-                "Average Loss": 0.0,
-                "Profit Factor": 0.0,
-                "Total Return": 0.0,
-                "Max Drawdown": 0.0,
-                "Sharpe Ratio": 0.0
-            }
-        total_trades = len(trades)
-        winning_trades = len([t for t in trades if t['profit_loss'] > 0])
-        losing_trades = len([t for t in trades if t['profit_loss'] <= 0])
-        profits = [t['profit_loss'] for t in trades if t['profit_loss'] > 0]
-        losses = [t['profit_loss'] for t in trades if t['profit_loss'] <= 0]
-        avg_profit = np.mean(profits) if profits else 0
-        avg_loss = np.mean(losses) if losses else 0
-        total_profit = sum(profits)
-        total_loss = sum(losses)
-        win_rate = winning_trades / total_trades if total_trades > 0 else 0
-        profit_factor = abs(total_profit / total_loss) if total_loss != 0 else float('inf')
-        total_return = (equity_curve.iloc[-1] - self.initial_capital) / self.initial_capital
-        max_drawdown = abs((equity_curve - equity_curve.expanding().max()).min())
-        sharpe_ratio = np.sqrt(252) * (equity_curve.pct_change().dropna().mean() / equity_curve.pct_change().dropna().std()) if len(equity_curve.pct_change().dropna()) > 1 else 0
-        return {
-            "Total Trades": total_trades,
-            "Winning Trades": winning_trades,
-            "Losing Trades": losing_trades,
-            "Avg Profit": avg_profit,
-            "Avg Loss": avg_loss,
-            "Win Rate": win_rate,
-            "Profit Factor": profit_factor,
-            "Total Return": total_return,
-            "Max Drawdown": max_drawdown,
-            "Sharpe Ratio": sharpe_ratio
-        }
 
     def print_statistics(self, stats, trade_type=""):
         print(f"\n{trade_type} Trading Statistics:")
@@ -711,11 +637,10 @@ def main():
 #    print(stock_data[[aroon_up_col, aroon_down_col, 'ADX']].head())
 #    print("Spalten in stock_data:", stock_data.columns)
     
-        # Plot der Ergebnisse
+    # Plot der Ergebnisse
     print("Erstelle Plot...")
     fig = system.plot_results(stock_data, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, stock_symbol)
     fig.show()
-
 import plotly.io as pio
 pio.renderers.default = 'browser'
 
