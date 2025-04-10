@@ -479,7 +479,22 @@ class TradingSystem:
             ),
             row=3, col=1
         )
-    
+        # Add slider to equity chart with adjusted size
+        fig.update_layout(
+            xaxis4=dict(
+                rangeslider=dict(
+                    visible=True,  # Ensure slider is tied to the second x-axis
+                    thickness=0.05  # Set slider thickness to a small value (min is 0, max is 1)
+                )
+            )
+        )
+        fig.update_layout(
+            xaxis1=dict(
+                rangeslider=dict(
+                    visible=False
+                )
+            )
+        )    
         # Equity curves
         fig.add_trace(
             go.Scatter(
