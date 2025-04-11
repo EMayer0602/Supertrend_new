@@ -6,13 +6,32 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from ta.trend import AroonIndicator, ADXIndicator
 
+def detect_patterns(df, high_col, low_col):
+    """
+    Identifiziert mögliche Dreiecke, Flaggen oder Wimpel basierend auf Hochs und Tiefs.
+    """
+    patterns = []
+    for i in range(5, len(df) - 5):  # Mindestens 5 Kerzen für Muster
+        local_highs = df[high_col].iloc[i-5:i+5]
+        local_lows = df[low_col].iloc[i-5:i+5]
 
-def flatten_dataframe(df):
-    flattened_df = df.copy()
-    if isinstance(df.columns, pd.MultiIndex):
-        flattened_df.columns = ['_'.join(col).strip() for col in df.columns.values]
-    print(f"NaN values in flattened DataFrame: {flattened_df.isna().sum().sum()}")
-    return flattened_df
+        # Symmetrisches Dreieck
+        if local_highs.is_monotonic_decreasing and local_lows.is_monotonic_increasing:
+            patterns.append((df.index[i], 'Symmetrisches Dreieck'))
+
+        # Aufsteigendes Dreieck
+        elif local_highs.is_monotonic_increasing and local_lows.is_monotonic_increasing:  # Geändert
+            patterns.append((df.index[i], 'Aufsteigendes Dreieck'))
+
+        # Absteigendes Dreieck
+        elif local_highs.is_monotonic_decreasing and local_lows.is_monotonic_decreasing:
+            patterns.append((df.index[i], 'Absteigendes Dreieck'))
+
+        # Flaggen/Wimpel
+        elif local_highs.is_monotonic_increasing and local_lows.is_monotonic_decreasing:
+            patterns.append((df.index[i], 'Flagge oder Wimpel'))
+
+    return patterns
 
 def get_supertrend(high, low, close, period, multiplier):
     tr1 = high - low
@@ -71,7 +90,7 @@ def get_supertrend(high, low, close, period, multiplier):
     colors = pd.Series(colors, index=Close.index)  # Series containing color information
 
     return st, combined, colors
-    
+
 def implement_st_strategy(prices, st):
     buy_price = []
     sell_price = []
@@ -103,6 +122,85 @@ def implement_st_strategy(prices, st):
             sell_price.append(np.nan)
             st_signal.append(0)
     return buy_price, sell_price, st_signal
+
+def add_pattern_markers(fig, patterns, df, row, col, high_col, low_col):
+    """
+    Adds markers for detected chart patterns to the plot.
+    Aligns the y-axis with the candlestick chart (high and low prices).
+
+    Parameters:
+        fig (go.Figure): The Plotly figure object.
+        patterns (list): List of tuples with (date, pattern name).
+        df (pd.DataFrame): The DataFrame containing the data.
+        row (int): The row number in the subplot.
+        col (int): The column number in the subplot.
+        high_col (str): The column name for high prices.
+        low_col (str): The column name for low prices.
+    """
+    for date, pattern in patterns:
+        if date in df.index:
+            # Use the high price for the marker's y position and add some padding
+            y_value = df.loc[date, high_col] * 1.01  # Slightly above the high price
+        else:
+            y_value = None  # Default to None if the date is not in the index
+
+        fig.add_trace(
+            go.Scatter(
+                x=[date],
+                y=[y_value],
+                mode='markers+text',
+                marker=dict(size=12, color='orange'),
+                text=pattern,
+                textposition='top center',
+                name='Pattern'
+            ),
+            row=row, col=col
+        )
+
+def add_candlesticks(fig, df, row, col, open_col, high_col, low_col, close_col):
+    """
+    Adds candlesticks to the chart.
+
+    Parameters:
+        fig (go.Figure): The Plotly figure object.
+        df (pd.DataFrame): The DataFrame containing the data.
+        row (int): The row number in the subplot.
+        col (int): The column number in the subplot.
+        open_col (str): The column name for open prices.
+        high_col (str): The column name for high prices.
+        low_col (str): The column name for low prices.
+        close_col (str): The column name for close prices.
+    """
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df[open_col],
+            high=df[high_col],
+            low=df[low_col],
+            close=df[close_col],
+            name="Candlesticks"
+        ),
+        row=row,
+        col=col
+    )
+
+def enhanced_strategy(df, high_col, low_col, close_col):
+    """
+    Kombiniert Mustererkennung, Supertrend und Aroon-Indikatoren.
+    """
+    patterns = detect_patterns(df, high_col, low_col)
+    buy_signals = []
+    sell_signals = []
+
+    for i, (date, pattern) in enumerate(patterns):
+        if pattern in ['Aufsteigendes Dreieck', 'Symmetrisches Dreieck']:
+            if df['Supertrend'].iloc[i] < df[close_col].iloc[i] and df[f'Aroon_Up_{close_col.split("_")[1]}'].iloc[i] > 70:
+                buy_signals.append(date)
+        elif pattern in ['Absteigendes Dreieck', 'Flagge oder Wimpel']:
+            if df['Supertrend'].iloc[i] > df[close_col].iloc[i] and df[f'Aroon_Down_{close_col.split("_")[1]}'].iloc[i] > 70:
+                sell_signals.append(date)
+
+    return buy_signals, sell_signals
 
 def calculate_aroon_adx(df, high_col, low_col, close_col):
     try:
@@ -314,7 +412,61 @@ class TradingSystem:
             "Max Drawdown": max_drawdown,
             "Sharpe Ratio": sharpe_ratio
         }
-                    
+
+    def create_chart(df, stock_symbol, patterns):
+        """
+        Creates a chart with candlesticks and patterns.
+    
+        Parameters:
+            df (pd.DataFrame): The DataFrame containing the stock data.
+            stock_symbol (str): The stock symbol.
+            patterns (list): List of tuples with (date, pattern name).
+    
+        Returns:
+            fig (go.Figure): The Plotly figure object.
+        """
+        # Define column names
+        open_col = f'Open_{stock_symbol}'
+        high_col = f'High_{stock_symbol}'
+        low_col = f'Low_{stock_symbol}'
+        close_col = f'Close_{stock_symbol}'
+    
+        # Create the figure with proper layout configuration
+        fig = make_subplots(
+            rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+            row_heights=[0.8, 0.05, 0.05, 0.05]  # Allocate 80% of height to candlestick chart
+        )
+    
+        # Add candlestick chart
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df[open_col],
+                high=df[high_col],
+                low=df[low_col],
+                close=df[close_col],
+                name="Candlesticks"
+            ),
+            row=1, col=1
+        )
+    
+        # Add pattern markers
+        add_pattern_markers(fig, patterns, df, row=1, col=1, high_col=high_col, low_col=low_col)
+    
+        # Update layout (enlarge y-axis and minimize slider size)
+        fig.update_layout(
+            title=f'{stock_symbol} Chart with Patterns',
+            height=1200,  # Increase overall chart height
+            xaxis1=dict(
+                rangeslider=dict(
+                    visible=True,
+                    thickness=0.01  # Minimized slider size
+                )
+            )
+        )
+    
+        return fig
+    
     def plot_results(self, df, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, symbol):
         # Prepare data for plots
         plot_df = df.iloc[15:]  # Skip first 15 rows for clarity
@@ -563,7 +715,6 @@ class TradingSystem:
                 print(f"{key}:\n{formatted_series}")
             else:
                 print(f"{key}: {value}")
-
 def main():
     stock_symbol = "ETH-EUR"
     system = TradingSystem()  # Instanziierung der TradingSystem-Klasse
@@ -585,34 +736,36 @@ def main():
     high_col = f'High_{stock_symbol}'
     low_col = f'Low_{stock_symbol}'
 
-    # Trend-Berechnungen (TrendUp und TrendDown)
-    if 'TrendUp' not in stock_data.columns:
-        try:
-            stock_data['ShortMA'] = stock_data[close_col].rolling(window=20).mean()
-            stock_data['LongMA'] = stock_data[close_col].rolling(window=50).mean()
-            stock_data['TrendUp'] = stock_data['ShortMA'] > stock_data['LongMA']
-            stock_data['TrendUp'] = stock_data['TrendUp'].fillna(False)
-            print("TrendUp column created successfully")
-        except Exception as e:
-            print(f"Error creating TrendUp column: {e}")
-            print("Available columns:", stock_data.columns)
-
-    if 'TrendDown' not in stock_data.columns:
-        stock_data['TrendDown'] = ~stock_data['TrendUp']
-    # Calculate Supertrend and Combined Supertrend
+    # Berechnung von Supertrend
     st, combined_supertrend, supertrend_colors = get_supertrend(
         stock_data[high_col], stock_data[low_col], stock_data[close_col], 7, 3
     )
-
-    # Add to the DataFrame
     stock_data['Supertrend'] = st
     stock_data['CombinedSupertrend'] = combined_supertrend
-    stock_data['SupertrendColors'] = supertrend_colors  # Add color information
+    stock_data['SupertrendColors'] = supertrend_colors
+
     # Implementierung der Supertrend-Strategie
     buy_price, sell_price, st_signal = implement_st_strategy(stock_data[close_col], stock_data['Supertrend'])
     stock_data['Buy_Signal_Price'] = buy_price
     stock_data['Sell_Signal_Price'] = sell_price
     stock_data['ST_Signal'] = st_signal
+
+    # Berechnung von Aroon und ADX
+    print("Berechnung von Aroon und ADX...")
+    stock_data = calculate_aroon_adx(stock_data, high_col, low_col, close_col)
+
+    # Mustererkennung: Dreiecke, Flaggen und Wimpel
+    print("Erkennung von Chartmustern...")
+    patterns = detect_patterns(stock_data, high_col, low_col)
+    print(f"Erkannte Muster: {patterns}")
+
+    # Erweiterte Strategie mit Mustern, Supertrend und Aroon
+    print("Generiere Kauf- und Verkaufssignale basierend auf Mustern...")
+    buy_signals, sell_signals = enhanced_strategy(stock_data, high_col, low_col, close_col)
+
+    # Hinzufügen der Signale in den DataFrame
+    stock_data['Pattern_Buy_Signals'] = stock_data.index.isin(buy_signals)
+    stock_data['Pattern_Sell_Signals'] = stock_data.index.isin(sell_signals)
 
     # Generierung von Handelslisten
     long_trades, short_trades = system.generate_trading_lists(stock_data, stock_symbol)
@@ -638,25 +791,23 @@ def main():
     short_stats = system.calculate_trade_statistics(short_trades, short_equity)
     system.print_statistics(long_stats, "Long")
     system.print_statistics(short_stats, "Short")
-
-    # Berechnung von Aroon und ADX
-    print("Berechnung von Aroon und ADX...")
-    stock_data = calculate_aroon_adx(stock_data, high_col, low_col, close_col)
-
-    # Debugging: Spalten und Werte
-    aroon_up_col = f'Aroon_Up_{stock_symbol}'
-    aroon_down_col = f'Aroon_Down_{stock_symbol}'
+    # Define the column names for high and low prices
+# Define the column names for high and low prices
+    high_col = f'High_{stock_symbol}'
+    low_col = f'Low_{stock_symbol}'
     
-    print("Nach Berechnung von Aroon und ADX:")
-    print(stock_data[[aroon_up_col, aroon_down_col, 'ADX']])
-#    print("Nach Berechnung von Aroon und ADX:")
-#    print(stock_data[[aroon_up_col, aroon_down_col, 'ADX']].head())
-#    print("Spalten in stock_data:", stock_data.columns)
-    
-    # Plot der Ergebnisse
-    print("Erstelle Plot...")
-    fig = system.plot_results(stock_data, long_trades, short_trades, long_equity, short_equity, buy_and_hold_equity, stock_symbol)
+     # Example patterns
+    patterns = [
+        ('2025-04-01', 'Symmetrisches Dreieck'),
+        ('2025-04-05', 'Flagge oder Wimpel')
+    ]
+
+    # Create the chart
+    fig = create_chart(stock_data, stock_symbol, patterns)
+
+    # Show the chart
     fig.show()
+
 import plotly.io as pio
 pio.renderers.default = 'browser'
 
