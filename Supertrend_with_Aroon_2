@@ -1,0 +1,442 @@
+# Import necessary libraries
+import pandas as pd
+import yfinance as yf
+from datetime import datetime, timedelta
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+# Get date range for last 365 days
+end_date = datetime.now()
+start_date = end_date - timedelta(days=365)
+
+# Download BTC data
+btc = yf.Ticker("BTC-EUR")
+btc_data = btc.history(start=start_date, end=end_date)
+
+# Function to calculate technical indicators and trend signals
+def calculate_indicators_and_trends(df, period=14):
+    df = df.copy()
+    df['TR'] = pd.DataFrame([
+        df['High'] - df['Low'],
+        abs(df['High'] - df['Close'].shift(1)),
+        abs(df['Low'] - df['Close'].shift(1))
+    ]).max()
+
+    df['UpMove'] = df['High'] - df['High'].shift(1)
+    df['DownMove'] = df['Low'].shift(1) - df['Low']
+
+    df['+DM'] = np.where((df['UpMove'] > df['DownMove']) & (df['UpMove'] > 0), df['UpMove'], 0)
+    df['-DM'] = np.where((df['DownMove'] > df['UpMove']) & (df['DownMove'] > 0), df['DownMove'], 0)
+
+    df['TR14'] = df['TR'].rolling(window=period).sum()
+    df['+DM14'] = df['+DM'].rolling(window=period).sum()
+    df['-DM14'] = df['-DM'].rolling(window=period).sum()
+
+    df['+DI'] = 100 * (df['+DM14'] / df['TR14'])
+    df['-DI'] = 100 * (df['-DM14'] / df['TR14'])
+    df['DX'] = 100 * abs(df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI'])
+    df['ADX'] = df['DX'].rolling(window=period).mean()
+
+    # Initialize trend signals
+    df['TrendUp'] = 0.0
+    df['TrendDown'] = 0.0
+    
+    # Calculate crossovers and trend signals
+    for i in range(1, len(df)):
+        prev_plus_di = df['+DI'].iloc[i-1]
+        prev_minus_di = df['-DI'].iloc[i-1]
+        curr_plus_di = df['+DI'].iloc[i]
+        curr_minus_di = df['-DI'].iloc[i]
+        
+        # Copy previous trends
+        df.loc[df.index[i], 'TrendUp'] = df.loc[df.index[i-1], 'TrendUp']
+        df.loc[df.index[i], 'TrendDown'] = df.loc[df.index[i-1], 'TrendDown']
+        
+        # Check for DI+ crossing above DI-
+        if prev_plus_di <= prev_minus_di and curr_plus_di > curr_minus_di:
+            df.loc[df.index[i], 'TrendUp'] = 1
+            df.loc[df.index[i], 'TrendDown'] = 0
+        
+        # Check for DI- crossing above DI+
+        if prev_plus_di >= prev_minus_di and curr_plus_di < curr_minus_di:
+            df.loc[df.index[i], 'TrendDown'] = 1
+            df.loc[df.index[i], 'TrendUp'] = 0
+
+    columns_to_drop = ['UpMove', 'DownMove', 'TR', '+DM', '-DM', 'TR14', '+DM14', '-DM14', 'DX']
+    df = df.drop(columns=columns_to_drop)
+    return df
+
+# Process data
+btc_data = calculate_indicators_and_trends(btc_data)
+
+# Funktion zur Berechnung der Trades
+# Funktion zur Berechnung der Handelslisten
+def generate_trading_lists(df):
+    long_trades = []
+    short_trades = []
+    current_position = None
+    entry_price = None
+    entry_index = None
+    entry_date = None  # Datum für den Einstieg
+    shares_long = 0
+    share_short = 0
+    
+    # Iteriere über die Datenreihe
+    for i in range(len(df)):
+        row = df.iloc[i]
+
+        # Long-Trades starten und stoppen
+        if row['TrendUp'] == 1 and current_position != 'Long':  # Long starten
+            if current_position == 'Short':  # Falls vorher Short, schließen
+                exit_price = row['Close']
+                pnl_short = shares_short * (entry_price - exit_price)
+                capital_short += pnl_short
+  
+                short_trades.append({
+                    "Type": "Short",
+                    "Buy Date": entry_date,
+                    "Sell Date": row.name,  # Zeige aktuelles Datum
+                    "Entry Price": entry_price,
+                    "Exit Price": row['Close'],
+                    "Shares short": shares_short,
+                    "PnL short": shares_short*(entry_price - row['Close']),
+                    "Capital Short After Trade": capital_short,
+                    "Duration": i - entry_index
+                })
+            current_position = 'Long'
+            entry_price = row['Close']
+            entry_index = i
+            entry_date = row.name  # Speichere das Kaufdatum
+            # Calculate shares as 80% of capital/price
+            shares_long = 0.5 * (capital_long / entry_price)
+
+        if row['TrendUp'] == 0 and current_position == 'Long':  # Long stoppen
+            long_trades.append({
+                "Type": "Long",
+                "Buy Date": entry_date,
+                "Sell Date": row.name,  # Zeige aktuelles Datum
+                "Entry Price": entry_price,
+                "Exit Price": row['Close'],
+                "Shares long": shares_long,
+                "PnL long": shares_longs*(row['Close'] - entry_price),
+                "Capital Long After Trade": capital_long
+                "Duration": i - entry_index
+                    "Duration": i - entry_index
+                })
+            current_position = None
+
+        # Short-Trades starten und stoppen
+        if row['TrendDown'] == 1 and current_position != 'Short':  # Short starten
+            if current_position == 'Long':  # Falls vorher Long, schließen
+                long_trades.append({
+                    "Type": "Long",
+                    "Buy Date": entry_date,
+                    "Sell Date": row.name,  # Zeige aktuelles Datum
+                    "Entry Price": entry_price,
+                    "Exit Price": row['Close'],
+                    "Shares long": shares_long,
+                    "PnL long": shares_long*(row['Close'] - entry_price),
+                    "Capital Long After Trade": capital_long,
+                    "Duration": i - entry_index
+                })
+            # Start new short position
+            current_position = 'Short'
+            entry_price = row['Close']
+            entry_index = i
+            entry_date = row.name
+            # Calculate shares as 80% of capital/price
+            shares_short = 0.5 * (capital_short / entry_price)
+#==============================================
+        if row['TrendDown'] == 0 and current_position == 'Short':  # Short stoppen
+            exit_price = row['Close']
+            pnl_short = shares_short * (entry_price - exit_price)
+            capital_short += pnl_short
+
+        if row['TrendDown'] == 0 and current_position == 'Short':  # Short stoppen
+            short_trades.append({
+                "Type": "Short",
+                "Buy Date": entry_date,
+                "Sell Date": row.
+                name,  # Zeige aktuelles Datum
+                "Entry Price": entry_price,
+                "Exit Price": row['Close'],
+                "Shares short": shares_short,
+                "PnL_short": shares_short*(entry_price - row['Close']),
+                "Capital Short After Trade": capital_short,
+                "Duration": i - entry_index
+            })
+            current_position = None
+
+    # Ergebnis zurückgeben
+    return pd.DataFrame(long_trades), pd.DataFrame(short_trades)
+
+# Generiere Long- und Short-Tradelisten
+long_trades, short_trades = generate_trading_lists(btc_data)
+
+# Handelsstatistiken berechnen
+def calculate_statistics(trades):
+    if trades.empty:
+        return {
+            "Total PnL": 0,
+            "Average PnL": 0,
+            "Average Duration": 0,
+            "Number of Trades": 0,
+            "Max Drawdown": 0
+        }
+    total_pnl = trades['PnL'].sum()
+    avg_pnl = trades['PnL'].mean()
+    avg_duration = trades['Duration'].mean()
+    num_trades = len(trades)
+    max_drawdown = calculate_max_drawdown(trades)
+    return {
+        "Total PnL": total_pnl,
+        "Average PnL": avg_pnl,
+        "Average Duration": avg_duration,
+        "Number of Trades": num_trades,
+        "Max Drawdown": max_drawdown
+    }
+
+# Max Drawdown-Berechnung
+def calculate_max_drawdown(trades):
+    if trades.empty:
+        return 0  # Kein Drawdown bei leeren Trades
+    cumulative_pnl = trades['PnL'].cumsum()  # Kumulativer Gewinn/Verlust
+    peak = cumulative_pnl.cummax()  # Laufender Höchststand
+    drawdown = (cumulative_pnl - peak) / peak  # Drawdown in Prozent
+    max_drawdown = drawdown.min()  # Größter Drawdown (negativer Wert)
+    return max_drawdown * -1  # Als positiver Prozentsatz zurückgeben
+
+# Berechne Statistiken für Long- und Short-Trades
+long_stats = calculate_statistics(long_trades)
+short_stats = calculate_statistics(short_trades)
+
+# Handelslisten schön anzeigen
+print("\nLong Trades (vollständig in einer Zeile):")
+print(long_trades.to_markdown(index=False, tablefmt="plain"))
+
+print("\nShort Trades (vollständig in einer Zeile):")
+print(short_trades.to_markdown(index=False, tablefmt="plain"))
+
+def calculate_trade_statistics(trades, equity_curve, initial_capital):
+    if trades.empty:
+        return {
+            "Total Trades": 0,
+            "Winning Trades": 0,
+            "Losing Trades": 0,
+            "Final Capital": initial_capital,
+            "Win Percentage": 0,
+            "Loss Percentage": 0,
+            "Max Drawdown": 0,
+            "Average Trade Return": 0
+        }
+
+    # Total trades
+    total_trades = len(trades)
+
+    # Winning and Losing trades
+    winning_trades = trades[trades['PnL long'] > 0].shape[0]
+    losing_trades = trades[trades['PnL short'] <= 0].shape[0]
+
+    # Final capital from equity curve
+    final_capital = equity_curve.iloc[-1]
+
+    # Win and Loss percentages
+    win_percentage = (winning_trades / total_trades) * 100
+    loss_percentage = (losing_trades / total_trades) * 100
+
+    # Average trade return
+    avg_trade_return = trades['PnL'].mean()
+
+    # Max Drawdown
+    cumulative_pnl = equity_curve - initial_capital
+    peak = cumulative_pnl.cummax()
+    drawdown = (cumulative_pnl - peak) / peak
+    max_drawdown = drawdown.min()
+
+    return {
+        "Total Trades": total_trades,
+        "Winning Trades": winning_trades,
+        "Losing Trades": losing_trades,
+        "Final Capital": final_capital,
+        "Win Percentage": win_percentage,
+        "Loss Percentage": loss_percentage,
+        "Max Drawdown": max_drawdown * -1,  # Convert to positive value
+        "Average Trade Return": avg_trade_return
+    }
+
+
+# Funktion zur Berechnung der Kapitalkurve
+def calculate_equity_curve_fixed(df, trade_type, initial_capital_long):
+    equity_curve = []
+    current_equity = initial_capital_long
+
+    for i in range(len(df)):
+        if i == 0:  # For the first entry, we just append the initial capital
+            equity_curve.append(current_equity)
+            continue
+        
+        row = df.iloc[i]
+        prev_row = df.iloc[i - 1]
+
+        if trade_type == 'Long':
+            # During active Long trend
+            if row['TrendUp'] == 1:
+                current_equity += row['Close'] - prev_row['Close']
+            # Append the constant equity when trend ends
+            equity_curve.append(current_equity)
+
+        elif trade_type == 'Short':
+            # During active Short trend
+            if row['TrendDown'] == 1:
+                current_equity -= row['Close'] - prev_row['Close']
+            # Append the constant equity when trend ends
+            equity_curve.append(current_equity)
+
+    return pd.Series(equity_curve, index=df.index)
+
+# Initial Capital
+initial_capital_long = 100000
+initial_capital_short = 100000
+# Long Capital Curve
+long_equity_curve = calculate_equity_curve_fixed(btc_data, trade_type='Long', initial_capital_long)
+
+# Short Capital Curve
+short_equity_curve = calculate_equity_curve_fixed(btc_data, trade_type='Short', initial_capita_short)
+
+# Long Trade Statistics
+long_stats = calculate_trade_statistics(long_trades, long_equity_curve, initial_capital_long)
+
+# Short Trade Statistics
+short_stats = calculate_trade_statistics(short_trades, short_equity_curve, initial_capital_short)
+
+# Print Statistics
+print("\nEnhanced Long Trade Statistics:")
+for key, value in long_stats.items():
+    print(f"{key}: {value}")
+
+print("\nEnhanced Short Trade Statistics:")
+for key, value in short_stats.items():
+    print(f"{key}: {value}")
+
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# Erstelle Subplots mit angepasster Höhe
+fig = make_subplots(
+    rows=6, cols=1,
+    shared_xaxes=True,  # Synchronisiere X-Achsen automatisch
+    vertical_spacing=0.05,
+    subplot_titles=(
+        "Long-Trades OHLC", "Long-Trades TrendUp", "Long-Trades Kapitalverlauf",
+        "Short-Trades OHLC", "Short-Trades TrendDown", "Short-Trades Kapitalverlauf"
+    ),
+    row_heights=[0.4, 0.1, 0.4, 0.4, 0.1, 0.4]  # Größenanpassungen: OHLC & Kapital doppelt so groß
+)
+
+# Long OHLC
+fig.add_trace(
+    go.Candlestick(
+        x=btc_data.index,
+        open=btc_data['Open'],
+        high=btc_data['High'],
+        low=btc_data['Low'],
+        close=btc_data['Close'],
+        name="BTC-EUR OHLC (Long)"
+    ),
+    row=1, col=1
+)
+
+# Long TrendUp
+fig.add_trace(
+    go.Scatter(
+        x=btc_data.index,
+        y=btc_data['TrendUp'],
+        name="TrendUp",
+        line=dict(color='green', dash='dot')
+    ),
+    row=2, col=1
+)
+
+# Long Kapitalverlauf
+fig.add_trace(
+    go.Scatter(
+        x=long_equity_curve.index,
+        y=long_equity_curve,
+        name="Long Equity Curve",
+        line=dict(color='blue')
+    ),
+    row=3, col=1
+)
+
+# Short OHLC
+fig.add_trace(
+    go.Candlestick(
+        x=btc_data.index,
+        open=btc_data['Open'],
+        high=btc_data['High'],
+        low=btc_data['Low'],
+        close=btc_data['Close'],
+        name="BTC-EUR OHLC (Short)"
+    ),
+    row=4, col=1
+)
+
+# Short TrendDown
+fig.add_trace(
+    go.Scatter(
+        x=btc_data.index,
+        y=btc_data['TrendDown'],
+        name="TrendDown",
+        line=dict(color='red', dash='dot')
+    ),
+    row=5, col=1
+)
+
+# Short Kapitalverlauf (Slider aktiv)
+fig.add_trace(
+    go.Scatter(
+        x=short_equity_curve.index,
+        y=short_equity_curve,
+        name="Short Equity Curve",
+        line=dict(color='purple')
+    ),
+    row=6, col=1
+)
+
+# Slider nur im letzten Chart aktiv
+fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+fig.update_xaxes(rangeslider_visible=False, row=2, col=1)
+fig.update_xaxes(rangeslider_visible=False, row=3, col=1)
+fig.update_xaxes(rangeslider_visible=False, row=4, col=1)
+fig.update_xaxes(rangeslider_visible=False, row=5, col=1)
+fig.update_xaxes(
+    rangeslider_visible=True,  # Slider hier aktiv
+    row=6, col=1,
+    rangeslider_thickness=0.05  # Minimaler Slider
+)
+
+# Layout anpassen
+fig.update_layout(
+    title="Charts mit synchronisierten X-Achsen und Slider im letzten Diagramm",
+    height=1400,  # Gesamthöhe
+    hovermode="x unified"
+)
+
+# Anzeigen
+fig.show()
