@@ -322,21 +322,6 @@ for key, value in short_stats.items():
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
 # Erstelle Subplots mit angepasster Höhe
 fig = make_subplots(
     rows=6, cols=1,
