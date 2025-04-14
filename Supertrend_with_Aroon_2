@@ -73,6 +73,7 @@ btc_data = calculate_indicators_and_trends(btc_data)
 
 # Funktion zur Berechnung der Trades
 # Funktion zur Berechnung der Handelslisten
+#XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 # Function to calculate trades with independent handling for long and short positions
 def generate_trading_lists(df, initial_capital_long, initial_capital_short):
     long_trades = []
@@ -103,8 +104,8 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
                     "Sell Date": row.name,
                     "Entry Price": entry_price,
                     "Exit Price": row['Close'],
-                    "Shares short": shares_short,
-                    "PnL short": pnl_short,
+                    "Shares Short": shares_short,
+                    "PnL Short": pnl_short,
                     "Capital Short After Trade": capital_short,
                     "Duration": i - entry_index
                 })
@@ -125,8 +126,8 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
                 "Sell Date": row.name,
                 "Entry Price": entry_price,
                 "Exit Price": row['Close'],
-                "Shares long": shares_long,
-                "PnL long": pnl_long,
+                "Shares Long": shares_long,
+                "PnL Long": pnl_long,
                 "Capital Long After Trade": capital_long,
                 "Duration": i - entry_index
             })
@@ -144,8 +145,8 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
                     "Sell Date": row.name,
                     "Entry Price": entry_price,
                     "Exit Price": row['Close'],
-                    "Shares long": shares_long,
-                    "PnL long": pnl_long,
+                    "Shares Long": shares_long,
+                    "PnL Long": pnl_long,
                     "Capital Long After Trade": capital_long,
                     "Duration": i - entry_index
                 })
@@ -166,8 +167,8 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
                 "Sell Date": row.name,
                 "Entry Price": entry_price,
                 "Exit Price": row['Close'],
-                "Shares short": shares_short,
-                "PnL short": pnl_short,
+                "Shares Short": shares_short,
+                "PnL Short": pnl_short,
                 "Capital Short After Trade": capital_short,
                 "Duration": i - entry_index
             })
@@ -175,122 +176,66 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
 
     # Return the resulting trades
     return pd.DataFrame(long_trades), pd.DataFrame(short_trades)
-# Handelsstatistiken berechnen
-def calculate_statistics(long_trades):
+
+# Function to calculate trade statistics
+def calculate_statistics(trades, pnl_column, duration_column):
     if trades.empty:
         return {
-            "Total PnL long": 0,
-            "Average PnL long": 0,
-            "Average Duration long": 0,
-            "Number of Trades long": 0,
-            "Max Drawdown long": 0
+            "Total PnL": 0,
+            "Average PnL": 0,
+            "Average Duration": 0,
+            "Number of Trades": 0,
+            "Max Drawdown": 0
         }
-    total_pnl_long = trades__long['PnL_long'].sum()
-    avg_pnl_long = trades_long['PnL_long'].mean()
-    avg_duration_long = trades['Duration_long'].mean()
-    num_trades_long = len(trades_long)
-    max_drawdown_long = calculate_max_drawdown(trades_long)
+    total_pnl = trades[pnl_column].sum()
+    avg_pnl = trades[pnl_column].mean()
+    avg_duration = trades[duration_column].mean()
+    num_trades = len(trades)
+    max_drawdown = calculate_max_drawdown(trades, pnl_column)
     return {
-        "Total PnL long": total_pnl_long,
-        "Average PnL long": avg_pnl_long,
-        "Average Duration long": avg_duration_long,
-        "Number of Trades long": num_trades_long,
-        "Max Drawdown long": max_drawdown_long
+        "Total PnL": total_pnl,
+        "Average PnL": avg_pnl,
+        "Average Duration": avg_duration,
+        "Number of Trades": num_trades,
+        "Max Drawdown": max_drawdown
     }
 
-# Max Drawdown-Berechnung
-def calculate_max_drawdown(trades):
+# Function to calculate max drawdown
+def calculate_max_drawdown(trades, pnl_column):
     if trades.empty:
-        return 0  # Kein Drawdown bei leeren Trades
-    cumulative_pnl = trades['PnL'].cumsum()  # Kumulativer Gewinn/Verlust
-    peak = cumulative_pnl.cummax()  # Laufender Höchststand
-    drawdown = (cumulative_pnl - peak) / peak  # Drawdown in Prozent
-    max_drawdown = drawdown.min()  # Größter Drawdown (negativer Wert)
-    return max_drawdown * -1  # Als positiver Prozentsatz zurückgeben
-
-# Berechne Statistiken für Long- und Short-Trades
-long_stats = calculate_statistics(long_trades)
-short_stats = calculate_statistics(short_trades)
-
-# Handelslisten schön anzeigen
-print("\nLong Trades (vollständig in einer Zeile):")
-print(long_trades.to_markdown(index=False, tablefmt="plain"))
-
-print("\nShort Trades (vollständig in einer Zeile):")
-print(short_trades.to_markdown(index=False, tablefmt="plain"))
-
-def calculate_trade_statistics(trades, equity_curve, initial_capital):
-    if trades.empty:
-        return {
-            "Total Trades": 0,
-            "Winning Trades": 0,
-            "Losing Trades": 0,
-            "Final Capital": initial_capital,
-            "Win Percentage": 0,
-            "Loss Percentage": 0,
-            "Max Drawdown": 0,
-            "Average Trade Return": 0
-        }
-
-    # Total trades
-    total_trades = len(trades)
-
-    # Winning and Losing trades
-    winning_trades = trades[trades['PnL'] > 0].shape[0]
-    losing_trades = trades[trades['PnL'] <= 0].shape[0]
-
-    # Final capital from equity curve
-    final_capital = equity_curve.iloc[-1]
-
-    # Win and Loss percentages
-    win_percentage = (winning_trades / total_trades) * 100
-    loss_percentage = (losing_trades / total_trades) * 100
-
-    # Average trade return
-    avg_trade_return = trades['PnL'].mean()
-
-    # Max Drawdown
-    cumulative_pnl = equity_curve - initial_capital
+        return 0
+    cumulative_pnl = trades[pnl_column].cumsum()
     peak = cumulative_pnl.cummax()
     drawdown = (cumulative_pnl - peak) / peak
     max_drawdown = drawdown.min()
+    return abs(max_drawdown)
 
-    return {
-        "Total Trades": total_trades,
-        "Winning Trades": winning_trades,
-        "Losing Trades": losing_trades,
-        "Final Capital": final_capital,
-        "Win Percentage": win_percentage,
-        "Loss Percentage": loss_percentage,
-        "Max Drawdown": max_drawdown * -1,  # Convert to positive value
-        "Average Trade Return": avg_trade_return
-    }
+# Function to calculate equity curve
+def calculate_equity_curve(trades, pnl_column, initial_capital):
+    equity_curve = [initial_capital]
+    for pnl in trades[pnl_column]:
+        equity_curve.append(equity_curve[-1] + pnl)
+    return pd.Series(equity_curve)
 
-# Capital initialization
+# Initialize capital
 initial_capital_long = 100000
 initial_capital_short = 100000
 
-# Generate Long and Short trade lists
+# Generate trades
 long_trades, short_trades = generate_trading_lists(btc_data, initial_capital_long, initial_capital_short)
 
-# Function to calculate equity curve
-def calculate_equity_curve(trades, initial_capital):
-    equity_curve = [initial_capital]
-    for _, trade in trades.iterrows():
-        equity_curve.append(equity_curve[-1] + trade['PnL long'] if 'PnL long' in trade else trade['PnL short'])
-    return pd.Series(equity_curve)
+# Calculate trade statistics
+long_stats = calculate_statistics(long_trades, pnl_column="PnL Long", duration_column="Duration")
+short_stats = calculate_statistics(short_trades, pnl_column="PnL Short", duration_column="Duration")
 
-# Calculate equity curves for long and short trades
-long_equity_curve = calculate_equity_curve(long_trades, initial_capital_long)
-short_equity_curve = calculate_equity_curve(short_trades, initial_capital_short)
+# Calculate equity curves
+long_equity_curve = calculate_equity_curve(long_trades, pnl_column="PnL Long", initial_capital=initial_capital_long)
+short_equity_curve = calculate_equity_curve(short_trades, pnl_column="PnL Short", initial_capital=initial_capital_short)
 
-# Combine equity curves for total equity
+# Combine equity curves
 combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)
 
-# Print statistics for Long, Short, and Combined trades
-long_stats = calculate_statistics(long_trades)
-short_stats = calculate_statistics(short_trades)
-
+# Print trade statistics
 print("\nLong Trade Statistics:")
 print(long_stats)
 
@@ -299,7 +244,6 @@ print(short_stats)
 
 print("\nCombined Equity Curve:")
 print(combined_equity_curve)
-
 
 # Erstelle Subplots mit angepasster Höhe
 fig = make_subplots(
