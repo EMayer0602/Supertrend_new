@@ -200,58 +200,58 @@ def calculate_statistics(trades, pnl_column, duration_column):
 
 # Function to calculate max drawdown
 # Function to calculate equity curve
-def calculate_equity_curve(trades, btc_data, pnl_column, initial_capital):
-    equity_curve = []
-    invested = False
-    last_value = initial_capital
+def calculate_equity_curve(trades, btc_data, trade_type, initial_capital):
+    """
+    Calculate the equity curve for long or short trades.
 
-    for index, row in btc_data.iterrows():
-        # Check if we are invested
-        if index in trades.index:
-            trade = trades.loc[index]
-            last_value = trade[pnl_column] + initial_capital
-            invested = True
-        elif invested:
-            last_value = row['Close']  # Follow Close values when invested
+    Parameters:
+    trades (DataFrame): DataFrame containing trade information.
+    btc_data (DataFrame): DataFrame with BTC price data.
+    trade_type (str): 'Long' or 'Short'.
+    initial_capital (float): Starting capital.
+
+    Returns:
+    Series: Equity curve as a pandas Series.
+    """
+    equity_curve = []
+    capital = initial_capital
+    invested = False  # Start with no active trades
+    exit_level = initial_capital  # Track the last exit capital
+
+    for i in range(len(btc_data)):
+        date = btc_data.index[i]
+        close = btc_data['Close'].iloc[i]
+
+        if invested:
+            # Update capital during the trade
+            if trade_type == 'Long':
+                capital += close - btc_data['Close'].iloc[i - 1]
+            elif trade_type == 'Short':
+                capital += btc_data['Close'].iloc[i - 1] - close
         else:
-            last_value = initial_capital  # Flat when not invested
-        
-        equity_curve.append(last_value)
-    
+            # Keep capital flat when not invested
+            capital = exit_level
+
+        # Check if there's a trade opening or closing on this date
+        if date in trades.index and trade['Type'] == trade_type and not invested:
+            trade = trades.loc[date]
+            if trade['Type'] == trade_type:
+                if not invested:
+                    # Start a new trade
+                    invested = True
+                    print(f"Trade Started: {trade_type} on {date}")
+                else:
+                    # End the trade
+                    invested = False
+                    capital = exit_level + trade[f"PnL {trade_type}"]
+                    exit_level = capital
+                    print(f"Trade Ended: {trade_type} on {date}, Capital: {capital}")
+
+        equity_curve.append(capital)
+
     return pd.Series(equity_curve, index=btc_data.index)
-    
-    # Sort trades by entry date
-    sorted_trades = trades.sort_values('Entry Date')
-    
-    # Track cumulative PnL
-    cumulative_pnl = 0
-    
-    # Update equity curve based on trade PnL
-    for i, (_, trade) in enumerate(sorted_trades.iterrows()):
-        entry_date = trade['Entry Date']
-        exit_date = trade['Exit Date']
-        pnl = trade[pnl_column]
-        
-        # Find indices for entry and exit dates
-        try:
-            entry_idx = btc_data.index.get_loc(entry_date)
-            exit_idx = btc_data.index.get_loc(exit_date)
-            
-            # Update cumulative PnL
-            cumulative_pnl += pnl
-            
-            # Update equity curve from exit date onwards
-            for j in range(exit_idx, len(equity_curve)):
-                equity_curve[j] = initial_capital + cumulative_pnl
-                
-        except KeyError:
-            # Handle case where date is not in btc_data index
-            print(f"Warning: Date not found in price data: {entry_date} or {exit_date}")
-            continue
-    
-    # Return the equity curve as a pandas Series
-    return pd.Series(equity_curve, index=btc_data.index)
-# Initialize capital
+    print(long_trades.head())
+    print(short_trades.head())
 initial_capital_long = 100000
 initial_capital_short = 100000
 # Long Capital Curve
@@ -259,20 +259,23 @@ initial_capital_short = 100000
 long_trades, short_trades = generate_trading_lists(btc_data, initial_capital_long=100000, initial_capital_short=100000)
 
 # Calculate equity curves
-long_equity_curve = calculate_equity_curve(long_trades, btc_data, pnl_column="PnL Long", initial_capital=100000)
-short_equity_curve = calculate_equity_curve(short_trades, btc_data, pnl_column="PnL Short", initial_capital=100000)
-
-# Combine equity curves
-combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)
-
+long_equity_curve = calculate_equity_curve(long_trades, btc_data, trade_type="Long", initial_capital=100000)
+short_equity_curve = calculate_equity_curve(short_trades, btc_data, trade_type="Short", initial_capital=100000)
+#print(long_trades)
+#print(short_trades)
 # Calculate trade statistics
 long_stats = calculate_statistics(long_trades, pnl_column="PnL Long", duration_column="Duration")
 short_stats = calculate_statistics(short_trades, pnl_column="PnL Short", duration_column="Duration")
 
 # Calculate equity curves
-long_equity_curve = calculate_equity_curve(long_trades,btc_data, pnl_column="PnL Long", initial_capital=initial_capital_long)
-short_equity_curve = calculate_equity_curve(short_trades,btc_data, pnl_column="PnL Short", initial_capital=initial_capital_short)
+# Generate trades
 
+# Combine equity curves
+combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)#long_equity_curve = calculate_equity_curve(long_trades, btc_data, trade_type='Long', initial_capital=100000, pnl_column="PnL Long")
+#short_equity_curve = calculate_equity_curve(short_trades, btc_data, trade_type='Short', initial_capital=100000, pnl_column="PnL Short")
+
+print(long_equity_curve)
+print(short_equity_curve)
 # Combine equity curves
 combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)
 
@@ -390,5 +393,3 @@ fig.update_layout(
 
 # Show the plot
 fig.show()
-
-
