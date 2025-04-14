@@ -201,39 +201,32 @@ def calculate_statistics(trades, pnl_column, duration_column):
 # Function to calculate max drawdown
 # Function to calculate equity curve
 def calculate_equity_curve(trades, btc_data, trade_type, initial_capital):
-    """
-    Calculate the equity curve for long or short trades.
-
-    Parameters:
-    trades (DataFrame): DataFrame containing trade information.
-    btc_data (DataFrame): DataFrame with BTC price data.
-    trade_type (str): 'Long' or 'Short'.
-    initial_capital (float): Starting capital.
-
-    Returns:
-    Series: Equity curve as a pandas Series.
-    """
     equity_curve = []
     capital = initial_capital
-    invested = False  # Start with no active trades
-    exit_level = initial_capital  # Track the last exit capital
+    invested = False
+    exit_level = initial_capital
 
-    for i in range(len(btc_data)):
-        date = btc_data.index[i]
-        close = btc_data['Close'].iloc[i]
+    for date in btc_data.index:
+        close = btc_data.loc[date, 'Close']
 
         if invested:
             # Update capital during the trade
             if trade_type == 'Long':
-                capital += close - btc_data['Close'].iloc[i - 1]
+                capital += close - btc_data.loc[btc_data.index[btc_data.index.get_loc(date) - 1], 'Close']
             elif trade_type == 'Short':
-                capital += btc_data['Close'].iloc[i - 1] - close
+                capital += btc_data.loc[btc_data.index[btc_data.index.get_loc(date) - 1], 'Close'] - close
         else:
             # Keep capital flat when not invested
             capital = exit_level
-
+        long_trades.index = pd.to_datetime(long_trades['Buy Date'])
+        short_trades.index = pd.to_datetime(short_trades['Buy Date'])
+        long_trades.index = long_trades.index.normalize()
+        short_trades.index = short_trades.index.normalize()
+        btc_data.index = btc_data.index.normalize()
+        if date in trades.index:
+            print(f"Matched Trade Date: {date}")
         # Check if there's a trade opening or closing on this date
-        if date in trades.index and trade['Type'] == trade_type and not invested:
+        if date in trades.index:
             trade = trades.loc[date]
             if trade['Type'] == trade_type:
                 if not invested:
@@ -250,13 +243,18 @@ def calculate_equity_curve(trades, btc_data, trade_type, initial_capital):
         equity_curve.append(capital)
 
     return pd.Series(equity_curve, index=btc_data.index)
-    print(long_trades.head())
-    print(short_trades.head())
+    
+
 initial_capital_long = 100000
 initial_capital_short = 100000
 # Long Capital Curve
 # Generate trades
+
 long_trades, short_trades = generate_trading_lists(btc_data, initial_capital_long=100000, initial_capital_short=100000)
+print("Generated Long Trades:")
+print(long_trades)
+print("Generated Short Trades:")
+print(short_trades)
 
 # Calculate equity curves
 long_equity_curve = calculate_equity_curve(long_trades, btc_data, trade_type="Long", initial_capital=100000)
