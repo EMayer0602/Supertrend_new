@@ -71,9 +71,7 @@ def calculate_indicators_and_trends(df, period=14):
 # Process data
 btc_data = calculate_indicators_and_trends(btc_data)
 
-# Funktion zur Berechnung der Trades
-# Funktion zur Berechnung der Handelslisten
-#XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
 # Function to calculate trades with independent handling for long and short positions
 def generate_trading_lists(df, initial_capital_long, initial_capital_short):
     long_trades = []
@@ -114,7 +112,7 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
             entry_price = row['Close']
             entry_index = i
             entry_date = row.name
-            shares_long = 0.5 * (capital_long / entry_price)  # Allocate 50% of capital
+            shares_long = 1.5 * (capital_long / entry_price)  # Allocate 50% of capital
 
         if row['TrendUp'] == 0 and current_position == 'Long':  # Stop Long
             pnl_long = shares_long * (row['Close'] - entry_price)
@@ -155,7 +153,7 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
             entry_price = row['Close']
             entry_index = i
             entry_date = row.name
-            shares_short = 0.5 * (capital_short / entry_price)  # Allocate 50% of capital
+            shares_short = 1.5 * (capital_short / entry_price)  # Allocate 50% of capital
 
         if row['TrendDown'] == 0 and current_position == 'Short':  # Stop Short
             pnl_short = shares_short * (entry_price - row['Close'])
@@ -201,36 +199,79 @@ def calculate_statistics(trades, pnl_column, duration_column):
     }
 
 # Function to calculate max drawdown
-def calculate_max_drawdown(trades, pnl_column):
-    if trades.empty:
-        return 0
-    cumulative_pnl = trades[pnl_column].cumsum()
-    peak = cumulative_pnl.cummax()
-    drawdown = (cumulative_pnl - peak) / peak
-    max_drawdown = drawdown.min()
-    return abs(max_drawdown)
-
 # Function to calculate equity curve
-def calculate_equity_curve(trades, pnl_column, initial_capital):
-    equity_curve = [initial_capital]
-    for pnl in trades[pnl_column]:
-        equity_curve.append(equity_curve[-1] + pnl)
-    return pd.Series(equity_curve)
+def calculate_equity_curve(trades, btc_data, pnl_column, initial_capital):
+    equity_curve = []
+    invested = False
+    last_value = initial_capital
 
+    for index, row in btc_data.iterrows():
+        # Check if we are invested
+        if index in trades.index:
+            trade = trades.loc[index]
+            last_value = trade[pnl_column] + initial_capital
+            invested = True
+        elif invested:
+            last_value = row['Close']  # Follow Close values when invested
+        else:
+            last_value = initial_capital  # Flat when not invested
+        
+        equity_curve.append(last_value)
+    
+    return pd.Series(equity_curve, index=btc_data.index)
+    
+    # Sort trades by entry date
+    sorted_trades = trades.sort_values('Entry Date')
+    
+    # Track cumulative PnL
+    cumulative_pnl = 0
+    
+    # Update equity curve based on trade PnL
+    for i, (_, trade) in enumerate(sorted_trades.iterrows()):
+        entry_date = trade['Entry Date']
+        exit_date = trade['Exit Date']
+        pnl = trade[pnl_column]
+        
+        # Find indices for entry and exit dates
+        try:
+            entry_idx = btc_data.index.get_loc(entry_date)
+            exit_idx = btc_data.index.get_loc(exit_date)
+            
+            # Update cumulative PnL
+            cumulative_pnl += pnl
+            
+            # Update equity curve from exit date onwards
+            for j in range(exit_idx, len(equity_curve)):
+                equity_curve[j] = initial_capital + cumulative_pnl
+                
+        except KeyError:
+            # Handle case where date is not in btc_data index
+            print(f"Warning: Date not found in price data: {entry_date} or {exit_date}")
+            continue
+    
+    # Return the equity curve as a pandas Series
+    return pd.Series(equity_curve, index=btc_data.index)
 # Initialize capital
 initial_capital_long = 100000
 initial_capital_short = 100000
-
+# Long Capital Curve
 # Generate trades
-long_trades, short_trades = generate_trading_lists(btc_data, initial_capital_long, initial_capital_short)
+long_trades, short_trades = generate_trading_lists(btc_data, initial_capital_long=100000, initial_capital_short=100000)
+
+# Calculate equity curves
+long_equity_curve = calculate_equity_curve(long_trades, btc_data, pnl_column="PnL Long", initial_capital=100000)
+short_equity_curve = calculate_equity_curve(short_trades, btc_data, pnl_column="PnL Short", initial_capital=100000)
+
+# Combine equity curves
+combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)
 
 # Calculate trade statistics
 long_stats = calculate_statistics(long_trades, pnl_column="PnL Long", duration_column="Duration")
 short_stats = calculate_statistics(short_trades, pnl_column="PnL Short", duration_column="Duration")
 
 # Calculate equity curves
-long_equity_curve = calculate_equity_curve(long_trades, pnl_column="PnL Long", initial_capital=initial_capital_long)
-short_equity_curve = calculate_equity_curve(short_trades, pnl_column="PnL Short", initial_capital=initial_capital_short)
+long_equity_curve = calculate_equity_curve(long_trades,btc_data, pnl_column="PnL Long", initial_capital=initial_capital_long)
+short_equity_curve = calculate_equity_curve(short_trades,btc_data, pnl_column="PnL Short", initial_capital=initial_capital_short)
 
 # Combine equity curves
 combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)
@@ -246,15 +287,16 @@ print("\nCombined Equity Curve:")
 print(combined_equity_curve)
 
 # Erstelle Subplots mit angepasster Höhe
+# Plot results
 fig = make_subplots(
     rows=6, cols=1,
-    shared_xaxes=True,  # Synchronisiere X-Achsen automatisch
+    shared_xaxes=True,
     vertical_spacing=0.05,
     subplot_titles=(
-        "Long-Trades OHLC", "Long-Trades TrendUp", "Long-Trades Kapitalverlauf",
-        "Short-Trades OHLC", "Short-Trades TrendDown", "Short-Trades Kapitalverlauf"
+        "Long-Trades OHLC", "Long-Trades TrendUp", "Long-Trades Equity Curve",
+        "Short-Trades OHLC", "Short-Trades TrendDown", "Short-Trades Equity Curve"
     ),
-    row_heights=[0.4, 0.1, 0.4, 0.4, 0.1, 0.4]  # Größenanpassungen: OHLC & Kapital doppelt so groß
+    row_heights=[0.4, 0.1, 0.4, 0.4, 0.1, 0.4]
 )
 
 # Long OHLC
@@ -281,7 +323,7 @@ fig.add_trace(
     row=2, col=1
 )
 
-# Long Kapitalverlauf
+# Long Equity Curve
 fig.add_trace(
     go.Scatter(
         x=long_equity_curve.index,
@@ -316,7 +358,7 @@ fig.add_trace(
     row=5, col=1
 )
 
-# Short Kapitalverlauf (Slider aktiv)
+# Short Equity Curve
 fig.add_trace(
     go.Scatter(
         x=short_equity_curve.index,
@@ -327,24 +369,26 @@ fig.add_trace(
     row=6, col=1
 )
 
-# Slider nur im letzten Chart aktiv
+# Slider only active on the last chart
 fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
 fig.update_xaxes(rangeslider_visible=False, row=2, col=1)
 fig.update_xaxes(rangeslider_visible=False, row=3, col=1)
 fig.update_xaxes(rangeslider_visible=False, row=4, col=1)
 fig.update_xaxes(rangeslider_visible=False, row=5, col=1)
 fig.update_xaxes(
-    rangeslider_visible=True,  # Slider hier aktiv
+    rangeslider_visible=True,
     row=6, col=1,
-    rangeslider_thickness=0.05  # Minimaler Slider
+    rangeslider_thickness=0.05
 )
 
-# Layout anpassen
+# Layout adjustments
 fig.update_layout(
-    title="Charts mit synchronisierten X-Achsen und Slider im letzten Diagramm",
-    height=1400,  # Gesamthöhe
+    title="Charts with synchronized X-axes and slider in the last chart",
+    height=1400,
     hovermode="x unified"
 )
 
-# Anzeigen
+# Show the plot
 fig.show()
+
+
