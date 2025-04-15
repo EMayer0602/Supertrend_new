@@ -6,6 +6,11 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pdb
+allocation_ratio = 1.5  # Can be parameterized
+precision = 0.01  # For assets like BTC
+initial_capital_long = 100000
+initial_capital_short = 100000
+initial_capital = 100000
 # Get date range for last 365 days
 end_date = datetime.now()
 start_date = end_date - timedelta(days=365)
@@ -112,8 +117,7 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
             entry_price = row['Close']
             entry_index = i
             entry_date = row.name
-            shares_long = 1.5 * (capital_long / entry_price)  # Allocate 50% of capital
-
+            shares_long = round((allocation_ratio * (capital_long / entry_price)) / precision) * precision
         if row['TrendUp'] == 0 and current_position == 'Long':  # Stop Long
             pnl_long = shares_long * (row['Close'] - entry_price)
             capital_long += pnl_long
@@ -153,7 +157,7 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
             entry_price = row['Close']
             entry_index = i
             entry_date = row.name
-            shares_short = 1.5 * (capital_short / entry_price)  # Allocate 50% of capital
+            shares_short = round((allocation_ratio * (capital_short / entry_price)) / precision) * precision
 
         if row['TrendDown'] == 0 and current_position == 'Short':  # Stop Short
             pnl_short = shares_short * (entry_price - row['Close'])
@@ -210,6 +214,36 @@ def calculate_max_drawdown(trades, pnl_column):
     return abs(max_drawdown)
 
 # Function to calculate both long and short equity curves
+# Function to calculate both long and short equity curves
+def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
+    global step_size
+    long_equity_curve = []
+    short_equity_curve = []
+    long_equity = initial_capital
+    short_equity = initial_capital
+    long_index = 0
+    short_index = 0
+
+    for date in btc_data.index:
+        close = btc_data.loc[date, 'Close']
+
+        # Update long equity
+        if long_index < len(long_trades) and date == long_trades.iloc[long_index]['Sell Date']:
+            long_equity = long_trades.iloc[long_index]['Capital Long After Trade']
+            long_index += 1
+        long_equity_curve.append(long_equity)
+
+        # Update short equity
+        if short_index < len(short_trades) and date == short_trades.iloc[short_index]['Sell Date']:
+            short_equity = short_trades.iloc[short_index]['Capital Short After Trade']
+            short_index += 1
+        short_equity_curve.append(short_equity)
+
+    return (
+        pd.Series(long_equity_curve, index=btc_data.index),
+        pd.Series(short_equity_curve, index=btc_data.index)
+    )
+'''
 def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
     """
     Calculate both long and short equity curves based on the provided trades and BTC data.
@@ -255,7 +289,7 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
         if not matching_long_trades.empty and not long_invested:
             trade = matching_long_trades.iloc[0]
             long_invested = True
-            long_shares = long_equity / close
+            shares_long = round((allocation_ratio * (capital_long / entry_price)) / precision) * precision
             print(f"Long Trade Started on {date}: Entry Price = {close}, Shares = {long_shares}")
 
         # Check if a short trade starts
@@ -263,7 +297,7 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
         if not matching_short_trades.empty and not short_invested:
             trade = matching_short_trades.iloc[0]
             short_invested = True
-            short_shares = short_equity / close
+            shares_short = round((allocation_ratio * (capital_short / entry_price)) / precision) * precision
             print(f"Short Trade Started on {date}: Entry Price = {close}, Shares = {short_shares}")
 
         # Check if a long trade ends
@@ -287,18 +321,17 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
         pd.Series(long_equity_curve, index=btc_data.index),
         pd.Series(short_equity_curve, index=btc_data.index)
     )
-
+'''
 # Example usage:
 # Assuming btc_data is the DataFrame with price data, with 'Close' as a column
 # Assuming initial capital
-initial_capital = 100000
 
 # Calculate both long and short equity curves
 long_equity_curve, short_equity_curve = calculate_both_equity_curves(
     long_trades=long_trades,
     short_trades=short_trades,
     btc_data=btc_data,
-    initial_capital=initial_capital
+    initial_capital=initial_capital,
 )
 
 # Print the resulting equity curves
@@ -306,8 +339,7 @@ print("Long Equity Curve:")
 print(long_equity_curve)
 print("Short Equity Curve:")
 print(short_equity_curve)
-initial_capital_long = 100000
-initial_capital_short = 100000
+
 # Long Capital Curve
 # Generate trades
 
@@ -318,8 +350,6 @@ print("Generated Short Trades:")
 print(short_trades)
 # Calculate equity curves
 # Assuming btc_data is the DataFrame with price data, with 'Close' as a column
-# Assuming initial capital
-initial_capital = 100000
 
 # Calculate both long and short equity curves
 long_equity_curve, short_equity_curve = calculate_both_equity_curves(
