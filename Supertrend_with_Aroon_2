@@ -208,58 +208,104 @@ def calculate_max_drawdown(trades, pnl_column):
     drawdown = (cumulative_pnl - peak) / peak
     max_drawdown = drawdown.min()
     return abs(max_drawdown)
-def calculate_equity_curve(trades, btc_data, trade_type, initial_capital):
+
+# Function to calculate both long and short equity curves
+def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
     """
-    Calculate the equity curve using both Buy Dates and Sell Dates.
+    Calculate both long and short equity curves based on the provided trades and BTC data.
     """
-    equity_curve = []
-    capital = initial_capital
-    invested = False  # Track whether a trade is currently open
-    entry_price = None  # Track the entry price of the trade
-    shares = None  # Track the number of shares purchased
-   
-    # Ensure btc_data index is in consistent datetime format and remove time zones
+    long_equity_curve = []
+    short_equity_curve = []
+    long_equity = initial_capital
+    short_equity = initial_capital
+    long_invested = False
+    short_invested = False
+    long_shares = None
+    short_shares = None
+
+    # Normalize dates in btc_data and trades
     btc_data.index = pd.to_datetime(btc_data.index).tz_localize(None)
-    
-    # Convert Buy Date and Sell Date to datetime and remove time zones
-    trades['Buy Date'] = pd.to_datetime(trades['Buy Date']).dt.tz_localize(None)
-    trades['Sell Date'] = pd.to_datetime(trades['Sell Date']).dt.tz_localize(None)
-    for date in btc_data.index:
-        close = btc_data.loc[date, 'Close']  # Get the closing price for this date
-        # Update equity during an open trade
-        if invested:
-            equity = shares * close  # Value of the trade based on current price
-            equity_curve.append(equity)
-            print(f"Active Trade on {date}: Close Price = {close}, Equity = {equity}")
+    long_trades['Buy Date'] = pd.to_datetime(long_trades['Buy Date']).dt.normalize()
+    long_trades['Sell Date'] = pd.to_datetime(long_trades['Sell Date']).dt.normalize()
+    short_trades['Buy Date'] = pd.to_datetime(short_trades['Buy Date']).dt.normalize()
+    short_trades['Sell Date'] = pd.to_datetime(short_trades['Sell Date']).dt.normalize()
+
+    # Iterate over BTC data
+    for i, date in enumerate(btc_data.index):
+        close = btc_data.loc[date, 'Close']
+
+        # Update long equity during an open long trade
+        if long_invested and i > 0:
+            prev_close = btc_data.iloc[i - 1]['Close']
+            long_equity += long_shares * (close - prev_close)
+            long_equity_curve.append(long_equity)
         else:
-            # Flat equity when not invested
-            equity_curve.append(capital)
-            print(f"No Active Trade on {date}: Capital = {capital}")
+            long_equity_curve.append(long_equity)
 
-        # Check if a trade starts on this date (Buy Date)
-        if date in trades['Buy Date'].values:
-            trade = trades[trades['Buy Date'] == date].iloc[0]
-            if trade['Type'] == trade_type and not invested:
-                # Start a trade
-                invested = True
-                entry_price = close
-                shares = capital / entry_price  # Calculate number of shares
-                print(f"Trade Started: {trade_type} on {date}, Entry Price: {entry_price}, Shares: {shares}")
+        # Update short equity during an open short trade
+        if short_invested and i > 0:
+            prev_close = btc_data.iloc[i - 1]['Close']
+            short_equity += short_shares * (prev_close - close)
+            short_equity_curve.append(short_equity)
+        else:
+            short_equity_curve.append(short_equity)
 
-        # Check if a trade ends on this date (Sell Date)
-        if date in trades['Sell Date'].values:
-            trade = trades[trades['Sell Date'] == date].iloc[0]
-            if trade['Type'] == trade_type and invested:
-                # End the trade
-                invested = False
-                capital = shares * close  # Update capital after selling
-                entry_price = None
-                shares = None
-                print(f"Trade Ended: {trade_type} on {date}, Exit Price: {close}, Capital: {capital}")
+        # Check if a long trade starts
+        matching_long_trades = long_trades[long_trades['Buy Date'] == date]
+        if not matching_long_trades.empty and not long_invested:
+            trade = matching_long_trades.iloc[0]
+            long_invested = True
+            long_shares = long_equity / close
+            print(f"Long Trade Started on {date}: Entry Price = {close}, Shares = {long_shares}")
 
-    return pd.Series(equity_curve, index=btc_data.index)
+        # Check if a short trade starts
+        matching_short_trades = short_trades[short_trades['Buy Date'] == date]
+        if not matching_short_trades.empty and not short_invested:
+            trade = matching_short_trades.iloc[0]
+            short_invested = True
+            short_shares = short_equity / close
+            print(f"Short Trade Started on {date}: Entry Price = {close}, Shares = {short_shares}")
 
+        # Check if a long trade ends
+        matching_long_trades = long_trades[long_trades['Sell Date'] == date]
+        if not matching_long_trades.empty and long_invested:
+            trade = matching_long_trades.iloc[0]
+            long_invested = False
+            long_shares = None
+            print(f"Long Trade Ended on {date}: Exit Price = {close}, Equity = {long_equity}")
 
+        # Check if a short trade ends
+        matching_short_trades = short_trades[short_trades['Sell Date'] == date]
+        if not matching_short_trades.empty and short_invested:
+            trade = matching_short_trades.iloc[0]
+            short_invested = False
+            short_shares = None
+            print(f"Short Trade Ended on {date}: Exit Price = {close}, Equity = {short_equity}")
+
+    # Return both equity curves as Pandas Series
+    return (
+        pd.Series(long_equity_curve, index=btc_data.index),
+        pd.Series(short_equity_curve, index=btc_data.index)
+    )
+
+# Example usage:
+# Assuming btc_data is the DataFrame with price data, with 'Close' as a column
+# Assuming initial capital
+initial_capital = 100000
+
+# Calculate both long and short equity curves
+long_equity_curve, short_equity_curve = calculate_both_equity_curves(
+    long_trades=long_trades,
+    short_trades=short_trades,
+    btc_data=btc_data,
+    initial_capital=initial_capital
+)
+
+# Print the resulting equity curves
+print("Long Equity Curve:")
+print(long_equity_curve)
+print("Short Equity Curve:")
+print(short_equity_curve)
 initial_capital_long = 100000
 initial_capital_short = 100000
 # Long Capital Curve
@@ -270,10 +316,24 @@ print("Generated Long Trades:")
 print(long_trades)
 print("Generated Short Trades:")
 print(short_trades)
-
 # Calculate equity curves
-long_equity_curve = calculate_equity_curve(long_trades, btc_data, trade_type="Long", initial_capital=100000)
-short_equity_curve = calculate_equity_curve(short_trades, btc_data, trade_type="Short", initial_capital=100000)
+# Assuming btc_data is the DataFrame with price data, with 'Close' as a column
+# Assuming initial capital
+initial_capital = 100000
+
+# Calculate both long and short equity curves
+long_equity_curve, short_equity_curve = calculate_both_equity_curves(
+    long_trades=long_trades,
+    short_trades=short_trades,
+    btc_data=btc_data,
+    initial_capital=initial_capital
+)
+
+# Print the resulting equity curves
+print("Long Equity Curve:")
+print(long_equity_curve)
+print("Short Equity Curve:")
+print(short_equity_curve)
 
 # Calculate trade statistics
 long_stats = calculate_statistics(long_trades, pnl_column="PnL Long", duration_column="Duration")
@@ -304,18 +364,15 @@ print("\nShort Trade Statistics:")
 print(short_stats)
 
 
-# Erstelle Subplots mit angepasster Höhe
-# Plot results
-fig = make_subplots(
-    rows=6, cols=1,
-    shared_xaxes=True,
-    vertical_spacing=0.05,
-    subplot_titles=(
-        "Long-Trades OHLC", "Long-Trades TrendUp", "Long-Trades Equity Curve",
-        "Short-Trades OHLC", "Short-Trades TrendDown", "Short-Trades Equity Curve"
-    ),
-    row_heights=[0.4, 0.1, 0.4, 0.4, 0.1, 0.4]
-)
+import plotly.offline as pyo
+from datetime import datetime
+
+# Create the figure with subplots
+fig = make_subplots(rows=6, cols=1, 
+                    shared_xaxes=True,
+                    vertical_spacing=0.05,
+                    subplot_titles=("BTC-EUR OHLC (Long)", "TrendUp", "Long Equity Curve", 
+                                   "BTC-EUR OHLC (Short)", "TrendDown", "Short Equity Curve"))
 
 # Long OHLC
 fig.add_trace(
@@ -326,6 +383,54 @@ fig.add_trace(
         low=btc_data['Low'],
         close=btc_data['Close'],
         name="BTC-EUR OHLC (Long)"
+    ),
+    row=1, col=1
+)
+
+# Generate Long entry/exit points based on TrendUp
+# Find where price crosses above TrendUp (entry) and below TrendUp (exit)
+long_entries = []
+long_entry_prices = []
+long_exits = []
+long_exit_prices = []
+
+# Starting from 2024-05-14
+start_date = datetime(2024, 5, 14)
+filtered_data = btc_data[btc_data.index >= start_date]
+
+for i in range(1, len(filtered_data)):
+    # Long entry: Close crosses above TrendUp
+    if (filtered_data['Close'].iloc[i-1] <= filtered_data['TrendUp'].iloc[i-1] and 
+        filtered_data['Close'].iloc[i] > filtered_data['TrendUp'].iloc[i]):
+        long_entries.append(filtered_data.index[i])
+        long_entry_prices.append(filtered_data['Close'].iloc[i])
+    
+    # Long exit: Close crosses below TrendUp
+    if (filtered_data['Close'].iloc[i-1] >= filtered_data['TrendUp'].iloc[i-1] and 
+        filtered_data['Close'].iloc[i] < filtered_data['TrendUp'].iloc[i]):
+        long_exits.append(filtered_data.index[i])
+        long_exit_prices.append(filtered_data['Close'].iloc[i])
+
+# Long entry points
+fig.add_trace(
+    go.Scatter(
+        x=long_entries,
+        y=long_entry_prices,
+        name="Long Entry Points",
+        mode='markers',
+        marker=dict(color='green', size=10, symbol='triangle-up')
+    ),
+    row=1, col=1
+)
+
+# Long exit points
+fig.add_trace(
+    go.Scatter(
+        x=long_exits,
+        y=long_exit_prices,
+        name="Long Exit Points",
+        mode='markers',
+        marker=dict(color='red', size=10, symbol='x')
     ),
     row=1, col=1
 )
@@ -365,6 +470,49 @@ fig.add_trace(
     row=4, col=1
 )
 
+# Generate Short entry/exit points based on TrendDown
+short_entries = []
+short_entry_prices = []
+short_exits = []
+short_exit_prices = []
+
+for i in range(1, len(filtered_data)):
+    # Short entry: Close crosses below TrendDown
+    if (filtered_data['Close'].iloc[i-1] >= filtered_data['TrendDown'].iloc[i-1] and 
+        filtered_data['Close'].iloc[i] < filtered_data['TrendDown'].iloc[i]):
+        short_entries.append(filtered_data.index[i])
+        short_entry_prices.append(filtered_data['Close'].iloc[i])
+    
+    # Short exit: Close crosses above TrendDown
+    if (filtered_data['Close'].iloc[i-1] <= filtered_data['TrendDown'].iloc[i-1] and 
+        filtered_data['Close'].iloc[i] > filtered_data['TrendDown'].iloc[i]):
+        short_exits.append(filtered_data.index[i])
+        short_exit_prices.append(filtered_data['Close'].iloc[i])
+
+# Short entry points
+fig.add_trace(
+    go.Scatter(
+        x=short_entries,
+        y=short_entry_prices,
+        name="Short Entry Points",
+        mode='markers',
+        marker=dict(color='red', size=10, symbol='triangle-down')
+    ),
+    row=4, col=1
+)
+
+# Short exit points
+fig.add_trace(
+    go.Scatter(
+        x=short_exits,
+        y=short_exit_prices,
+        name="Short Exit Points",
+        mode='markers',
+        marker=dict(color='green', size=10, symbol='x')
+    ),
+    row=4, col=1
+)
+
 # Short TrendDown
 fig.add_trace(
     go.Scatter(
@@ -399,12 +547,13 @@ fig.update_xaxes(
     rangeslider_thickness=0.05
 )
 
-# Layout adjustments
+# Set the x-axis range to focus on data from 2024-05-14 onwards
 fig.update_layout(
-    title="Charts with synchronized X-axes and slider in the last chart",
+    xaxis=dict(range=[start_date, None]),  # From start_date to the end of the data
+    title="BTC-EUR Trading Strategy Analysis",
     height=1400,
     hovermode="x unified"
 )
 
-# Show the plot
-fig.show()
+# Display the plot in a web browser
+pyo.plot(fig, filename='btc_trading_analysis.html', auto_open=True)
