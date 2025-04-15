@@ -118,6 +118,8 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
             entry_index = i
             entry_date = row.name
             shares_long = round((allocation_ratio * (capital_long / entry_price)) / precision) * precision
+            print(f"DEBUG: Starting Long Trade - entry_price={entry_price}, shares_long={shares_long}")
+
         if row['TrendUp'] == 0 and current_position == 'Long':  # Stop Long
             pnl_long = shares_long * (row['Close'] - entry_price)
             capital_long += pnl_long
@@ -134,6 +136,7 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
                 "Duration": i - entry_index
             })
             current_position = None
+            print(f"DEBUG: Ending Long Trade - pnl_long={pnl_long}, capital_long={capital_long}")
 
         # Short-Trades: Start and Stop
         if row['TrendDown'] == 1 and current_position != 'Short':  # Start Short
@@ -158,9 +161,11 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
             entry_index = i
             entry_date = row.name
             shares_short = round((allocation_ratio * (capital_short / entry_price)) / precision) * precision
+            print(f"DEBUG: Starting Short Trade - entry_price={entry_price}, shares_short={shares_short}")
 
         if row['TrendDown'] == 0 and current_position == 'Short':  # Stop Short
-            pnl_short = shares_short * (entry_price - row['Close'])
+            exit_price = row['Close']
+            pnl_short = shares_short * (entry_price - exit_price)
             capital_short += pnl_short
 
             short_trades.append({
@@ -175,8 +180,28 @@ def generate_trading_lists(df, initial_capital_long, initial_capital_short):
                 "Duration": i - entry_index
             })
             current_position = None
+            print(f"DEBUG: Ending Short Trade - pnl_short={pnl_short}, capital_short={capital_short}")
 
-    # Return the resulting trades
+    # Handle any open trades after the loop ends
+    if current_position == 'Short':
+        # Close the active short trade at the last available price
+        exit_price = df.iloc[-1]['Close']
+        pnl_short = shares_short * (entry_price - exit_price)
+        capital_short += pnl_short
+
+        short_trades.append({
+            "Type": "Short",
+            "Buy Date": entry_date,
+            "Sell Date": df.index[-1],  # Use the last index as Sell Date
+            "Entry Price": entry_price,
+            "Exit Price": exit_price,
+            "Shares Short": shares_short,
+            "PnL Short": pnl_short,
+            "Capital Short After Trade": capital_short,
+            "Duration": len(df) - entry_index
+        })
+        print(f"DEBUG: Final Short Trade - entry_price={entry_price}, exit_price={exit_price}, pnl_short={pnl_short}, capital_short={capital_short}")
+
     return pd.DataFrame(long_trades), pd.DataFrame(short_trades)
 
 
@@ -212,10 +237,11 @@ def calculate_max_drawdown(trades, pnl_column):
     drawdown = (cumulative_pnl - peak) / peak
     max_drawdown = drawdown.min()
     return abs(max_drawdown)
+
 def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
     """
     Calculate both long and short equity curves based on the provided trades and BTC data.
-    Uses shares directly from the long and short trades instead of calculating them.
+    Ensures the last trade (e.g., short trade) is included in the equity curve.
 
     Parameters:
     - long_trades: DataFrame containing long trades.
@@ -290,12 +316,18 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
             short_shares = 0
             print(f"Short Trade Ended on {date}: Exit Price = {trade['Exit Price']}, Equity = {short_equity}")
 
-    # Return both equity curves as Pandas Series
-    return (
-        pd.Series(long_equity_curve, index=btc_data.index),
-        pd.Series(short_equity_curve, index=btc_data.index)
-    )
+    # Ensure the last short trade is included in the equity curve
+    if short_invested:
+        last_close = btc_data.iloc[-1]['Close']
+        short_equity += short_shares * (btc_data.iloc[-2]['Close'] - last_close)
+        short_equity_curve[-1] = short_equity  # Update the last value in the curve
+        print(f"Final Short Trade included: Exit Price = {last_close}, Equity = {short_equity}")
 
+    # Convert equity curves to Pandas Series
+    long_equity_curve = pd.Series(long_equity_curve, index=btc_data.index)
+    short_equity_curve = pd.Series(short_equity_curve, index=btc_data.index)
+
+    return long_equity_curve, short_equity_curve
     
 # Example usage:
 # Assuming btc_data is the DataFrame with price data, with 'Close' as a column
@@ -353,7 +385,7 @@ combined_equity_curve = long_equity_curve.add(short_equity_curve, fill_value=0)#
 pd.set_option('display.max_rows', None)
     # Ensure 'Buy Date' is the index and properly normalized
     # Normalize btc_data index
-
+#print(f"DEBUG: Final Short Trade - entry_price={entry_price}, exit_price={exit_price}, pnl_short={pnl_short}, capital_short={capital_short}")
 print(long_equity_curve)
 print(short_equity_curve)
 # Combine equity curves
