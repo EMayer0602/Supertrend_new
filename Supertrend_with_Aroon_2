@@ -212,7 +212,7 @@ def calculate_max_drawdown(trades, pnl_column):
     drawdown = (cumulative_pnl - peak) / peak
     max_drawdown = drawdown.min()
     return abs(max_drawdown)
-
+'''
 # Function to calculate both long and short equity curves
 # Function to calculate both long and short equity curves
 def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
@@ -223,7 +223,14 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
     short_equity = initial_capital
     long_index = 0
     short_index = 0
+    from datetime import datetime, timezone
 
+# Starting from 2024-05-14
+    end_date = datetime.now()
+    # Ensure btc_data.index is timezone-naive
+    btc_data.index = btc_data.index.tz_localize(None)
+    # Filter data using the global start_date and end_date
+    filtered_data = btc_data[(btc_data.index >= start_date) & (btc_data.index <= end_date)]
     for date in btc_data.index:
         close = btc_data.loc[date, 'Close']
 
@@ -321,7 +328,7 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
         pd.Series(long_equity_curve, index=btc_data.index),
         pd.Series(short_equity_curve, index=btc_data.index)
     )
-'''
+
 # Example usage:
 # Assuming btc_data is the DataFrame with price data, with 'Close' as a column
 # Assuming initial capital
