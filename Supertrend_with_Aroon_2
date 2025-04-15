@@ -420,13 +420,12 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
 
 # Example initialization
 initial_capital = 100000  # Starting capital for both long and short trades
-print(f"Long Trade Started on {date}: Entry Price = {trade['Entry Price']}, Shares = {long_shares}")
-print(f"Long Trade Ended on {date}: Exit Price = {trade['Exit Price']}, Equity = {long_equity}")
-matching_long_trades = long_trades[long_trades['Buy Date'] == date]
-matching_short_trades = short_trades[short_trades['Buy Date'] == date]
+#print(f"Long Trade Started on {date}: Entry Price = {trade['Entry Price']}, Shares = {long_shares}")
+#print(f"Long Trade Ended on {date}: Exit Price = {trade['Exit Price']}, Equity = {long_equity}")
+#matching_long_trades = long_trades[long_trades['Buy Date'] == date]
+#matching_short_trades = short_trades[short_trades['Buy Date'] == date]
 # Calculate equity curves
 # Example initialization
-initial_capital = 100000  # Starting capital
 
 # Calculate equity curves
 long_equity_curve, short_equity_curve = calculate_both_equity_curves(
