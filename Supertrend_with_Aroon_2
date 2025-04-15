@@ -250,7 +250,7 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
         pd.Series(long_equity_curve, index=btc_data.index),
         pd.Series(short_equity_curve, index=btc_data.index)
     )
-'''
+
 def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
     """
     Calculate both long and short equity curves based on the provided trades and BTC data.
@@ -328,12 +328,107 @@ def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_ca
         pd.Series(long_equity_curve, index=btc_data.index),
         pd.Series(short_equity_curve, index=btc_data.index)
     )
+'''
+def calculate_both_equity_curves(long_trades, short_trades, btc_data, initial_capital):
+    """
+    Calculate both long and short equity curves based on the provided trades and BTC data.
+    Uses shares directly from the long and short trades instead of calculating them.
 
+    Parameters:
+    - long_trades: DataFrame containing long trades.
+    - short_trades: DataFrame containing short trades.
+    - btc_data: DataFrame containing BTC price data with a datetime index.
+    - initial_capital: Starting capital for both long and short trades.
+
+    Returns:
+    - long_equity_curve: Pandas Series for the long equity curve.
+    - short_equity_curve: Pandas Series for the short equity curve.
+    """
+    # Initialize variables
+    long_equity_curve = []
+    short_equity_curve = []
+    long_equity = initial_capital
+    short_equity = initial_capital
+    long_invested = False
+    short_invested = False
+    long_shares = 0
+    short_shares = 0
+
+    # Normalize dates in btc_data and trades
+    btc_data.index = pd.to_datetime(btc_data.index).tz_localize(None)
+    long_trades['Buy Date'] = pd.to_datetime(long_trades['Buy Date']).dt.normalize()
+    long_trades['Sell Date'] = pd.to_datetime(long_trades['Sell Date']).dt.normalize()
+    short_trades['Buy Date'] = pd.to_datetime(short_trades['Buy Date']).dt.normalize()
+    short_trades['Sell Date'] = pd.to_datetime(short_trades['Sell Date']).dt.normalize()
+
+    # Iterate over BTC data
+    for i, date in enumerate(btc_data.index):
+        close = btc_data.loc[date, 'Close']
+
+        # Update long equity during an open long trade
+        if long_invested:
+            long_equity += long_shares * (close - btc_data.iloc[i - 1]['Close'])
+        long_equity_curve.append(long_equity)
+
+        # Update short equity during an open short trade
+        if short_invested:
+            short_equity += short_shares * (btc_data.iloc[i - 1]['Close'] - close)
+        short_equity_curve.append(short_equity)
+
+        # Check if a long trade starts on this date
+        matching_long_trades = long_trades[long_trades['Buy Date'] == date]
+        if not matching_long_trades.empty and not long_invested:
+            trade = matching_long_trades.iloc[0]
+            long_invested = True
+            long_shares = trade['Shares Long']  # Use shares directly from long_trades
+            print(f"Long Trade Started on {date}: Entry Price = {trade['Entry Price']}, Shares = {long_shares}")
+
+        # Check if a short trade starts on this date
+        matching_short_trades = short_trades[short_trades['Buy Date'] == date]
+        if not matching_short_trades.empty and not short_invested:
+            trade = matching_short_trades.iloc[0]
+            short_invested = True
+            short_shares = trade['Shares Short']  # Use shares directly from short_trades
+            print(f"Short Trade Started on {date}: Entry Price = {trade['Entry Price']}, Shares = {short_shares}")
+
+        # Check if a long trade ends on this date
+        matching_long_trades = long_trades[long_trades['Sell Date'] == date]
+        if not matching_long_trades.empty and long_invested:
+            trade = matching_long_trades.iloc[0]
+            long_invested = False
+            long_shares = 0
+            print(f"Long Trade Ended on {date}: Exit Price = {trade['Exit Price']}, Equity = {long_equity}")
+
+        # Check if a short trade ends on this date
+        matching_short_trades = short_trades[short_trades['Sell Date'] == date]
+        if not matching_short_trades.empty and short_invested:
+            trade = matching_short_trades.iloc[0]
+            short_invested = False
+            short_shares = 0
+            print(f"Short Trade Ended on {date}: Exit Price = {trade['Exit Price']}, Equity = {short_equity}")
+
+    # Return both equity curves as Pandas Series
+    return (
+        pd.Series(long_equity_curve, index=btc_data.index),
+        pd.Series(short_equity_curve, index=btc_data.index)
+    )
+
+    
 # Example usage:
 # Assuming btc_data is the DataFrame with price data, with 'Close' as a column
 # Assuming initial capital
 
-# Calculate both long and short equity curves
+# Example initialization
+initial_capital = 100000  # Starting capital for both long and short trades
+print(f"Long Trade Started on {date}: Entry Price = {trade['Entry Price']}, Shares = {long_shares}")
+print(f"Long Trade Ended on {date}: Exit Price = {trade['Exit Price']}, Equity = {long_equity}")
+matching_long_trades = long_trades[long_trades['Buy Date'] == date]
+matching_short_trades = short_trades[short_trades['Buy Date'] == date]
+# Calculate equity curves
+# Example initialization
+initial_capital = 100000  # Starting capital
+
+# Calculate equity curves
 long_equity_curve, short_equity_curve = calculate_both_equity_curves(
     long_trades=long_trades,
     short_trades=short_trades,
@@ -341,10 +436,18 @@ long_equity_curve, short_equity_curve = calculate_both_equity_curves(
     initial_capital=initial_capital,
 )
 
+# Print results
+print("Long Equity Curve:")
+print(long_equity_curve)
+
+print("\nShort Equity Curve:")
+print(short_equity_curve)
+
 # Print the resulting equity curves
 print("Long Equity Curve:")
 print(long_equity_curve)
-print("Short Equity Curve:")
+
+print("\nShort Equity Curve:")
 print(short_equity_curve)
 
 # Long Capital Curve
