@@ -1,4 +1,4 @@
-https://github.com/# Assistant
+# Assistant
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
@@ -97,6 +97,131 @@ plt.plot(date_low[mask_low], low[mask_low], 'mo', markersize=8, label='Box Low P
 # Add grid and labels
 plt.grid(True, alpha=0.3)
 plt.title('Darvas Box Analysis for Google (First Year)', fontsize=14)
+plt.xlabel('Date', fontsize=12)
+plt.ylabel('Price', fontsize=12)
+plt.legend(loc='best')
+
+# Ensure the plot is displayed
+plt.tight_layout()
+plt.show()
+
+#===========================================================================================================
+import pandas as pd
+import yfinance as yf
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.patches as patches
+
+# Download Google data
+start_date = datetime(2023, 1, 1)
+end_date = datetime.now()
+goog = yf.download("BTC-EUR", start=start_date, end=end_date)
+
+# Flatten the multi-level columns if needed
+if isinstance(goog.columns, pd.MultiIndex):
+    goog.columns = [col[0] for col in goog.columns]
+
+# Perform Darvas Box Creation on Google Data
+class box(object):
+    high = []
+    low = []
+    date_high = []
+    date_low = []
+
+box1 = box()
+idx = 0
+d = []
+
+for i in range(1, len(goog)):
+    if(goog.High.iloc[i] <= goog.High.iloc[i-1]):
+        idx = idx + 1
+    else:
+        idx = 0
+    
+    if idx == 6:
+        d.append(i)
+        high_vals = goog.High.iloc[i-6:i]
+        low_vals = goog.Low.iloc[i-6:i]
+        box1.high.append(high_vals.max())
+        box1.low.append(low_vals.min())
+        box1.date_high.append(goog.index[i-6])
+        box1.date_low.append(goog.index[i-6+np.argmin(low_vals)])
+
+# Convert to numpy arrays
+high = np.array(box1.high)
+low = np.array(box1.low)
+date_high = np.array(box1.date_high)
+date_low = np.array(box1.date_low)
+
+# Print summary of boxes found
+print(f"Total boxes found: {len(high)}")
+print(f"First few high values: {high[:5] if len(high) > 0 else 'None'}")
+print(f"First few dates: {date_high[:5] if len(date_high) > 0 else 'None'}")
+
+# Create a new figure with a larger size
+plt.figure(figsize=(15, 8))
+
+# Plot the stock price data
+plt.plot(goog.index, goog.High, 'b-', alpha=0.5, linewidth=0.8, label='Price High')
+plt.plot(goog.index, goog.Low, 'r-', alpha=0.5, linewidth=0.8, label='Price Low')
+
+# Plot the rectangles for the high and low points
+ax = plt.gca()  # Get the current axes
+
+# Convert dates to matplotlib format
+from matplotlib.dates import date2num
+
+# Draw actual boxes instead of just points
+for i in range(len(high)):
+    # Get start date and end date (assuming boxes span 6 days)
+    start_date = date2num(date_high[i])
+    # End date is 6 days after start
+    end_date = start_date + 6
+    
+    # Calculate box dimensions
+    width = end_date - start_date
+    height = high[i] - low[i]
+    
+    # Draw the box
+    rect = patches.Rectangle(
+        (start_date, low[i]),  # (x, y) of bottom left corner
+        width,                 # width of rectangle
+        height,                # height of rectangle
+        linewidth=2,
+        edgecolor='green',
+        facecolor='green',
+        alpha=0.3
+    )
+    ax.add_patch(rect)
+    
+    # Add markers for high and low points for better visibility
+    plt.plot(date_high[i], high[i], 'go', markersize=8)
+    plt.plot(date_low[i], low[i], 'mo', markersize=8)
+
+# Add grid and labels
+plt.grid(True, alpha=0.3)
+plt.title('Darvas Box Analysis for Google', fontsize=14)
+plt.xlabel('Date', fontsize=12)
+plt.ylabel('Price', fontsize=12)
+plt.legend(loc='best')
+
+# Format the x-axis to show dates properly
+plt.gcf().autofmt_xdate()
+
+# Ensure the plot is displayed
+plt.tight_layout()
+plt.show()
+for dl, ll in zip(date_low, low):
+    # Convert timestamp to matplotlib date format
+    dl_num = date2num(dl)
+    # Adding a rectangle for the low point
+    rect = patches.Rectangle((dl_num, ll - 0.5), width=1, height=1, color='magenta', alpha=0.5)
+    ax.add_patch(rect)
+
+# Add grid and labels
+plt.grid(True, alpha=0.3)
+plt.title('Darvas Box Analysis for Google', fontsize=14)
 plt.xlabel('Date', fontsize=12)
 plt.ylabel('Price', fontsize=12)
 plt.legend(loc='best')
