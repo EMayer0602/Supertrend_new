@@ -1,0 +1,106 @@
+https://github.com/# Assistant
+import pandas as pd
+import yfinance as yf
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+
+%matplotlib inline
+
+# Download Google data
+start_date = datetime(2024, 1, 1)
+end_date = datetime.now()
+goog = yf.download("BTC-EUR", start=start_date, end=end_date)
+
+# Flatten the multi-level columns if needed
+if isinstance(goog.columns, pd.MultiIndex):
+    goog.columns = [col[0] for col in goog.columns]
+
+# Perform Darvas Box Creation on Google Data
+class box(object):
+    high = []
+    low = []
+    date_high = []
+    date_low = []
+
+box1 = box()
+idx = 0
+d = []
+
+for i in range(1, len(goog)):
+    if(goog.High.iloc[i] <= goog.High.iloc[i-1]):
+        idx = idx + 1
+    else:
+        idx = 0
+    
+    if idx == 6:
+        d.append(i)
+        high_vals = goog.High.iloc[i-6:i]
+        low_vals = goog.Low.iloc[i-6:i]
+        box1.high.append(high_vals.max())
+        box1.low.append(low_vals.min())
+        box1.date_high.append(goog.index[i-6])
+        box1.date_low.append(goog.index[i-6+np.argmin(low_vals)])
+
+# Convert to numpy arrays
+high = np.array(box1.high)
+low = np.array(box1.low)
+date_high = np.array(box1.date_high)
+date_low = np.array(box1.date_low)
+
+# Print summary of boxes found
+print(f"Total boxes found: {len(high)}")
+print(f"First few high values: {high[:5] if len(high) > 0 else 'None'}")
+print(f"First few dates: {date_high[:5] if len(date_high) > 0 else 'None'}")
+
+# Create a new figure with a larger size
+plt.figure(figsize=(15, 8))
+
+# Plot the stock price data
+plt.plot(goog.index, goog.High, 'b-', alpha=0.5, linewidth=0.8, label='Price High')
+plt.plot(goog.index, goog.Low, 'r-', alpha=0.5, linewidth=0.8, label='Price Low')
+
+# Plot the box points with larger markers and different colors
+plt.plot(date_high, high, 'go', markersize=6, label='Box High Points')
+plt.plot(date_low, low, 'mo', markersize=6, label='Box Low Points')
+
+# Add grid and labels
+plt.grid(True, alpha=0.3)
+plt.title('Darvas Box Analysis for Google', fontsize=14)
+plt.xlabel('Date', fontsize=12)
+plt.ylabel('Price', fontsize=12)
+plt.legend(loc='best')
+
+# Ensure the plot is displayed
+plt.tight_layout()
+plt.show()
+
+# If you want to see the boxes more clearly, you can create a second plot
+# focusing on a specific time period
+plt.figure(figsize=(15, 8))
+
+# Choose a specific time period (e.g., first year)
+start_view = goog.index[0]
+end_view = start_view + pd.DateOffset(months=12)
+mask = (goog.index >= start_view) & (goog.index <= end_view)
+
+# Plot the stock price for the selected period
+plt.plot(goog.loc[mask].index, goog.loc[mask, 'High'], 'b-', linewidth=1, label='Price High')
+plt.plot(goog.loc[mask].index, goog.loc[mask, 'Low'], 'r-', linewidth=1, label='Price Low')
+
+# Plot the box points for the selected period
+mask_high = (date_high >= start_view) & (date_high <= end_view)
+mask_low = (date_low >= start_view) & (date_low <= end_view)
+plt.plot(date_high[mask_high], high[mask_high], 'go', markersize=8, label='Box High Points')
+plt.plot(date_low[mask_low], low[mask_low], 'mo', markersize=8, label='Box Low Points')
+
+# Add grid and labels
+plt.grid(True, alpha=0.3)
+plt.title('Darvas Box Analysis for Google (First Year)', fontsize=14)
+plt.xlabel('Date', fontsize=12)
+plt.ylabel('Price', fontsize=12)
+plt.legend(loc='best')
+
+# Ensure the plot is displayed
+plt.tight_layout()
+plt.show()
