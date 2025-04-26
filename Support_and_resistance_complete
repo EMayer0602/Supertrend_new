@@ -1,0 +1,529 @@
+# Import necessary libraries
+import pandas as pd
+import yfinance as yf
+import numpy as np
+from scipy.signal import argrelextrema
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+# Add this import at the top of your code
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates  # Import mdates for date formatting
+from mplfinance.original_flavor import candlestick_ohlc
+''''
+# Download BTC data
+def get_btc_data():
+    btc = yf.Ticker("BTC-EUR")
+    btc_data = btc.history(period="1y")
+    return btc_data
+'''
+def get_data(ticker, period="1y", interval="1d"):
+    """
+    Fetch historical data for the given ticker.
+    """
+    try:
+        data = yf.download(ticker, period=period, interval=interval, auto_adjust=False)
+        # Flatten multi-level column names if they exist
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+        return data
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+# Calculate Jurik SMA (20)
+def jurik_sma(series, period=20):
+    return series.rolling(window=period).mean()
+
+def round_to_multiple(value, multiple):
+    """Round a value to the nearest multiple of a given parameter."""
+    if multiple == 0 or multiple is None:
+        raise ValueError("The 'multiple' parameter must be greater than 0.")
+    return round(value / multiple) * multiple
+# Funktion zur Berechnung der Trades
+
+# Identify support and resistance levels
+def identify_support_resistance(df, window=10):
+    """
+    Identify support and resistance levels using local extrema.
+    """
+    prices = df["Close"].values.ravel()
+    local_min_idx = argrelextrema(prices, np.less, order=window)[0]
+    local_max_idx = argrelextrema(prices, np.greater, order=window)[0]
+    
+    support = pd.Series(prices[local_min_idx], index=df.index[local_min_idx])
+    resistance = pd.Series(prices[local_max_idx], index=df.index[local_max_idx])
+    
+    return support, resistance
+
+# Trading strategy
+def long_trading_strategy(data, support, initial_capital=100000, share_rounding=0.01):
+    """
+    Execute the long trading strategy:
+    - Buy at support levels if no long position is open.
+    - Sell at resistance levels if a long position is open.
+    """
+    long_trades = []
+    position = None  # Track current position: "long" or None
+    total_long_profit = 0
+    long_equity_curve = pd.Series(index=data.index, dtype=float)  # Initialize with data index
+    current_equity = initial_capital
+
+    for date, price in data["Close"].items():
+        # Open a long trade at support
+        if date in support.index and position != "long":
+            shares_long = round_to_multiple(current_equity / price, share_rounding)
+            long_trades.append((date, "BUY LONG", price, shares_long, 0))  # Add PnL as 0 for opening trades
+            position = "long"
+            position_price = price
+
+        # Close the long trade at resistance
+        if date in resistance.index and position == "long":
+            shares_long = round_to_multiple(current_equity / position_price, share_rounding)
+            profit = shares_long * (price - position_price)
+            total_long_profit += profit
+            current_equity += profit
+            long_equity_curve[date] = current_equity
+            long_trades.append((date, "SELL LONG", price, shares_long, profit))  # Include PnL for closing trades
+            position = None
+
+    # Forward-fill equity curve to ensure all dates have values
+    long_equity_curve.ffill(inplace=True)
+
+    return long_trades, total_long_profit, long_equity_curve
+
+def short_trading_strategy(data, resistance, initial_capital=100000, share_rounding=0.01):
+    """
+    Execute the short trading strategy:
+    - Short at resistance levels if no short position is open.
+    - Cover at support levels if a short position is open.
+    """
+    short_trades = []
+    position = None  # Track current position: "short" or None
+    total_short_profit = 0
+    short_equity_curve = pd.Series(index=data.index, dtype=float)  # Initialize with data index
+    current_equity = initial_capital
+
+    for date, price in data["Close"].items():
+        # Open a short trade at resistance
+        if date in resistance.index and position != "short":
+            shares_short = round_to_multiple(current_equity / price, share_rounding)
+            short_trades.append((date, "SHORT", price, shares_short, 0))  # Add PnL as 0 for opening trades
+            position = "short"
+            position_price = price
+
+        # Close the short trade at support
+        if date in support.index and position == "short":
+            shares_short = round_to_multiple(current_equity / position_price, share_rounding)
+            profit = shares_short * (position_price - price)
+            total_short_profit += profit
+            current_equity += profit
+            short_equity_curve[date] = current_equity
+            short_trades.append((date, "COVER SHORT", price, shares_short, profit))  # Include PnL for closing trades
+            position = None
+
+    # Forward-fill equity curve to ensure all dates have values
+    short_equity_curve.ffill(inplace=True)
+
+    return short_trades, total_short_profit, short_equity_curve
+
+
+def trading_strategy(data, support, resistance, initial_capital=100000, share_rounding=0.01):
+    long_trades = []
+    short_trades = []
+    position = None  # Track current position: "long", "short", or None
+    total_long_profit = 0
+    total_short_profit = 0
+    long_equity_curve = pd.Series(index=data.index, dtype=float)  # Initialize with data index
+    short_equity_curve = pd.Series(index=data.index, dtype=float)  # Initialize with data index
+    current_equity = initial_capital
+
+    for date, price in data["Close"].items():
+        # Check for support levels to open a long trade
+        if date in support.index and position != "long":  # Open a long trade if no long position is active
+            shares_long = round_to_multiple(current_equity / price, share_rounding)
+            long_trades.append((date, "BUY LONG", price, shares_long, 0))  # Add PnL as 0 for opening trades
+            print(f"Opened Long Trade: {long_trades[-1]}")  # Debug print
+            position = "long"
+            position_price = price
+
+        # Check for resistance levels to open a short trade
+        if date in resistance.index and position != "short":  # Open a short trade if no short position is active
+            shares_short = round_to_multiple(current_equity / price, share_rounding)
+            short_trades.append((date, "SHORT", price, shares_short, 0))  # Add PnL as 0 for opening trades
+            print(f"Opened Short Trade: {short_trades[-1]}")  # Debug print
+            position = "short"
+            position_price = price
+
+        # Close long position at resistance
+        if date in resistance.index and position == "long":
+            shares_long = round_to_multiple(current_equity / position_price, share_rounding)
+            profit = shares_long * (price - position_price)
+            total_long_profit += profit
+            current_equity += profit
+            long_equity_curve[date] = current_equity
+            long_trades.append((date, "SELL LONG", price, shares_long, profit))  # Include PnL for closing trades
+            print(f"Closed Long Trade: {long_trades[-1]}")  # Debug print
+            position = None
+
+        # Close short position at support
+        if date in support.index and position == "short":
+            shares_short = round_to_multiple(current_equity / position_price, share_rounding)
+            profit = shares_short * (position_price - price)
+            total_short_profit += profit
+            current_equity += profit
+            short_equity_curve[date] = current_equity
+            short_trades.append((date, "COVER SHORT", price, shares_short, profit))  # Include PnL for closing trades
+            print(f"Closed Short Trade: {short_trades[-1]}")  # Debug print
+            position = None
+
+    # Forward-fill equity curves to ensure all dates have values
+    long_equity_curve.ffill(inplace=True)
+    short_equity_curve.ffill(inplace=True)
+
+    return long_trades, short_trades, total_long_profit, total_short_profit, long_equity_curve, short_equity_curve
+
+# Calculate trade statistics
+
+def calculate_trade_statistics(trades, equity_curve, initial_capital):
+    if trades.empty:
+        return {
+            "Total Trades": 0,
+            "Winning Trades": 0,
+            "Losing Trades": 0,
+            "Final Capital": initial_capital,
+            "Win Percentage": 0,
+            "Loss Percentage": 0,
+            "Max Drawdown": 0,
+            "Average Trade Return": 0
+        }
+
+    # Total trades
+    total_trades = len(trades)
+
+    # Winning and Losing trades
+    winning_trades = trades[trades['PnL'] > 0].shape[0]
+    losing_trades = trades[trades['PnL'] <= 0].shape[0]
+
+    # Final capital from equity curve
+    final_capital = equity_curve.iloc[-1]
+
+    # Win and Loss percentages
+    win_percentage = (winning_trades / total_trades) * 100
+    loss_percentage = (losing_trades / total_trades) * 100
+
+    # Average trade return
+    avg_trade_return = trades['PnL'].mean()
+
+    # Max Drawdown
+    cumulative_pnl = equity_curve - initial_capital
+    peak = cumulative_pnl.cummax()
+    drawdown = (cumulative_pnl - peak) / peak
+    max_drawdown = drawdown.min()
+
+    return {
+        "Total Trades": total_trades,
+        "Winning Trades": winning_trades,
+        "Losing Trades": losing_trades,
+        "Final Capital": final_capital,
+        "Win Percentage": win_percentage,
+        "Loss Percentage": loss_percentage,
+        "Max Drawdown": max_drawdown * -1,  # Convert to positive value
+        "Average Trade Return": avg_trade_return
+    }
+
+def match_trades(trades, last_close_price):
+    """
+    Match trades into pairs of buy/sell for long trades and short/cover for short trades.
+    Includes open trades matched with the last close price.
+    """
+    completed_trades = []
+    open_trade = None
+
+    for _, trade in trades.iterrows():
+        action = trade["Action"]
+        date = trade["Date"]
+        price = trade["Price"]
+        shares = trade["Shares"]
+        pnl = trade.get("PnL", 0)  # PnL is only available for closing trades
+
+        if action in ["BUY LONG", "SHORT"]:
+            # Open a new trade
+            open_trade = {"Entry Date": date, "Entry Action": action, "Entry Price": price, "Shares": shares}
+        elif action in ["SELL LONG", "COVER SHORT"] and open_trade:
+            # Close the open trade
+            open_trade.update({
+                "Exit Date": date,
+                "Exit Action": action,
+                "Exit Price": price,
+                "PnL": pnl
+            })
+            completed_trades.append(open_trade)
+            open_trade = None  # Reset open trade
+
+    # Handle open trades at the end of the dataset
+    if open_trade:
+        open_trade.update({
+            "Exit Date": "Open",
+            "Exit Action": "Open Trade",
+            "Exit Price": last_close_price,
+            "PnL": 0  # PnL is unknown for open trades
+        })
+        completed_trades.append(open_trade)
+
+    return pd.DataFrame(completed_trades)
+
+def calculate_long_equity_curve(df, trades, initial_capital=10000):
+    """
+    Calculate the equity curve for long trades.
+    The equity curve follows market moves only when invested.
+    Includes open trades matched with the last close price.
+    """
+    equity_curve = []
+    current_equity = initial_capital
+    shares_long = 0
+
+    for i in range(len(df)):
+        row = df.iloc[i]
+
+        # Check if today is the entry date of a long trade
+        entry_trade = trades[(trades['Entry Date'] == row.name)]
+        if not entry_trade.empty:
+            shares_long = entry_trade.iloc[0]['Shares']
+            equity_curve.append(current_equity)  # Equity remains the same on the entry day
+            continue  # Skip calculation for the entry day
+
+        # Update equity if a long position is active
+        if shares_long > 0:
+            current_equity += shares_long * (row['Close'] - df.iloc[i - 1]['Close'])
+
+        # Check if today is the exit date of a long trade
+        exit_trade = trades[(trades['Exit Date'] == row.name)]
+        if not exit_trade.empty:
+            shares_long = 0  # Reset shares after closing the position
+
+        equity_curve.append(current_equity)
+
+    # Handle open trades at the end of the dataset
+    if shares_long > 0:
+        last_close = df.iloc[-1]['Close']
+        current_equity += shares_long * (last_close - df.iloc[-2]['Close'])
+        equity_curve[-1] = current_equity  # Update the last equity value
+
+    return pd.Series(equity_curve, index=df.index)
+
+def calculate_short_equity_curve(df, trades, initial_capital=10000):
+    """
+    Calculate the equity curve for short trades.
+    The equity curve follows market moves only when invested.
+    Includes open trades matched with the last close price.
+    """
+    equity_curve = []
+    current_equity = initial_capital
+    shares_short = 0
+
+    for i in range(len(df)):
+        row = df.iloc[i]
+
+        # Check if today is the entry date of a short trade
+        entry_trade = trades[(trades['Entry Date'] == row.name)]
+        if not entry_trade.empty:
+            shares_short = entry_trade.iloc[0]['Shares']
+            equity_curve.append(current_equity)  # Equity remains the same on the entry day
+            continue  # Skip calculation for the entry day
+
+        # Update equity if a short position is active
+        if shares_short > 0:
+            current_equity -= shares_short * (row['Close'] - df.iloc[i - 1]['Close'])
+
+        # Check if today is the exit date of a short trade
+        exit_trade = trades[(trades['Exit Date'] == row.name)]
+        if not exit_trade.empty:
+            shares_short = 0  # Reset shares after closing the position
+
+        equity_curve.append(current_equity)
+
+    # Handle open trades at the end of the dataset
+    if shares_short > 0:
+        last_close = df.iloc[-1]['Close']
+        current_equity -= shares_short * (last_close - df.iloc[-2]['Close'])
+        equity_curve[-1] = current_equity  # Update the last equity value
+
+    return pd.Series(equity_curve, index=df.index)
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+def plot_results(data, support, resistance, long_equity_curve, short_equity_curve):
+    """
+    Plot the results using Plotly, including:
+    - Candlestick chart with support/resistance levels and Jurik SMA.
+    - Equity curves for long and short trades.
+    """
+    fig = make_subplots(
+        rows=2, cols=1,  # Merge the first two charts into one
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        row_heights=[2, 1],  # Increase the height of the candlestick chart (2x the equity curve)
+        subplot_titles=("BTC-EUR OHLC with Support/Resistance and Jurik SMA", "Equity Curves")
+    )
+
+    # Add OHLC chart with green and red candles
+    fig.add_trace(
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name="BTC-EUR OHLC",
+            increasing=dict(line=dict(color='green'), fillcolor='green'),  # Green for bullish candles
+            decreasing=dict(line=dict(color='red'), fillcolor='red')      # Red for bearish candles
+        ),
+        row=1, col=1
+    )
+
+    # Add Jurik SMA line
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data['Jurik_SMA_20'],
+            mode='lines',
+            name="Jurik SMA (20)",
+            line=dict(color='orange', width=2)
+        ),
+        row=1, col=1
+    )
+
+    # Add support levels as green markers
+    fig.add_trace(
+        go.Scatter(
+            x=support.index,
+            y=support,
+            mode='markers',
+            name="Support",
+            marker=dict(color='green', size=8)
+        ),
+        row=1, col=1
+    )
+
+    # Add resistance levels as red markers
+    fig.add_trace(
+        go.Scatter(
+            x=resistance.index,
+            y=resistance,
+            mode='markers',
+            name="Resistance",
+            marker=dict(color='red', size=8)
+        ),
+        row=1, col=1
+    )
+
+    # Add long equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=long_equity_curve.index,
+            y=long_equity_curve,
+            name="Long Equity Curve",
+            line=dict(color='blue')
+        ),
+        row=2, col=1
+    )
+
+    # Add short equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=short_equity_curve.index,
+            y=short_equity_curve,
+            name="Short Equity Curve",
+            line=dict(color='purple')
+        ),
+        row=2, col=1
+    )
+
+    # Update layout
+    fig.update_layout(
+        title="BTC-EUR Trading Strategy with Support/Resistance, Jurik SMA, and Equity Curves",
+        height=900,  # Adjust overall height
+        hovermode="x unified"
+    )
+
+    # Open the plot in the default browser
+    fig.write_html("plot.html")
+    import webbrowser
+    webbrowser.open("plot.html")
+
+import plotly.io as pio
+pio.renderers.default = 'browser'
+if __name__ == "__main__":
+    # Get BTC data
+    data = get_data("BTC-EUR", period="1y", interval="1d")
+
+    # Ensure data is not None
+    if data is None or data.empty:
+        print("Error: No data fetched. Please check the ticker symbol or internet connection.")
+        exit()
+
+    # Calculate Jurik SMA (20)
+    data['Jurik_SMA_20'] = jurik_sma(data['Close'], period=20)
+
+    # Identify support and resistance levels
+    support, resistance = identify_support_resistance(data, window=10)
+
+    print("\nSupport Levels:")
+    print(support)
+    print("\nResistance Levels:")
+    print(resistance)
+
+    # Execute the long trading strategy
+    long_trades, total_long_profit, long_equity_curve = long_trading_strategy(
+        data, support, initial_capital=100000, share_rounding=0.01
+    )
+
+    # Execute the short trading strategy
+    short_trades, total_short_profit, short_equity_curve = short_trading_strategy(
+        data, resistance, initial_capital=100000, share_rounding=0.01
+    )
+
+    # Convert trades to DataFrames
+    long_trades_df = pd.DataFrame(long_trades, columns=["Date", "Action", "Price", "Shares", "PnL"])
+    short_trades_df = pd.DataFrame(short_trades, columns=["Date", "Action", "Price", "Shares", "PnL"])
+
+    # Debug prints
+    print("\nLong Trades DataFrame:")
+    print(long_trades_df.head())
+
+    print("\nShort Trades DataFrame:")
+    print(short_trades_df.head())
+
+    # Get the last close price from the dataset
+    last_close_price = data.iloc[-1]['Close']
+
+    # Match trades into pairs
+    completed_long_trades = match_trades(long_trades_df, last_close_price)
+    completed_short_trades = match_trades(short_trades_df, last_close_price)
+
+    # Debug prints
+    print("\nCompleted Long Trades:")
+    print(completed_long_trades)
+
+    print("\nCompleted Short Trades:")
+    print(completed_short_trades)
+
+    # Calculate and print trade statistics
+    long_stats = calculate_trade_statistics(completed_long_trades, long_equity_curve, initial_capital=100000)
+    short_stats = calculate_trade_statistics(completed_short_trades, short_equity_curve, initial_capital=100000)
+
+    print("\nLong Trade Statistics:")
+    for key, value in long_stats.items():
+        print(f"{key}: {value}")
+
+    print("\nShort Trade Statistics:")
+    for key, value in short_stats.items():
+        print(f"{key}: {value}")
+
+    # Calculate equity curves
+    long_equity_curve = calculate_long_equity_curve(data, completed_long_trades, initial_capital=100000)
+    short_equity_curve = calculate_short_equity_curve(data, completed_short_trades, initial_capital=100000)
+
+    # Plot the results
+    plot_results(data, support, resistance, long_equity_curve, short_equity_curve)
