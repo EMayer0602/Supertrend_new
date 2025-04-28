@@ -1,0 +1,407 @@
+import yfinance as yf
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.signal import argrelextrema
+import matplotlib.dates as mdates
+from matplotlib.ticker import FuncFormatter
+import webbrowser
+import os
+
+def get_data(ticker, period="1y", interval="1d"):
+    """
+    Fetch historical data for the given ticker.
+    """
+    try:
+        data = yf.download(ticker, period=period, interval=interval, auto_adjust=False)
+        # Flatten multi-level column names if they exist
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+        return data
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+def identify_support_resistance(df, window=10):
+    """
+    Identify support and resistance levels using local extrema.
+    """
+    prices = df["Close"].values.ravel()
+    local_min_idx = argrelextrema(prices, np.less, order=window)[0]
+    local_max_idx = argrelextrema(prices, np.greater, order=window)[0]
+    
+    support = pd.Series(prices[local_min_idx], index=df.index[local_min_idx])
+    resistance = pd.Series(prices[local_max_idx], index=df.index[local_max_idx])
+    
+    return support, resistance
+
+def trading_strategy(data, support, resistance):
+    """
+    Implement a trading strategy:
+    - Buy long at support and sell at resistance.
+    - Short at resistance and cover at support.
+    """
+    trades = []
+    position = None  # Track current position: "long", "short", or None
+
+    # Change iteritems() to items() - this is the fix for the error
+    for date, price in data["Close"].items():
+        if date in support.index:  # Buy long at support
+            if position is None:  # No active position
+                trades.append((date, "BUY LONG", price))
+                position = "long"
+            elif position == "short":  # Cover short at support
+                trades.append((date, "COVER SHORT", price))
+                position = None
+
+        if date in resistance.index:  # Short at resistance
+            if position is None:  # No active position
+                trades.append((date, "SHORT", price))
+                position = "short"
+            elif position == "long":  # Sell long at resistance
+                trades.append((date, "SELL LONG", price))
+                position = None
+
+    return trades
+
+def plot_support_resistance(data, support, resistance, ticker):
+    """
+    Plot the closing price along with detected support and resistance levels.
+    """
+    # Create figure and subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1]})
+    
+    # Calculate width for candlestick plot
+    width = 0.6
+    
+    # Create up and down DataFrames for price movement direction
+    up = data[data.Close >= data.Open]
+    down = data[data.Close < data.Open]
+    
+    # Plot candlesticks
+    ax1.bar(up.index, up.Close - up.Open, width, bottom=up.Open, color='green', alpha=0.5)
+    ax1.bar(up.index, up.High - up.Close, width * 0.1, bottom=up.Close, color='green', alpha=0.5)
+    ax1.bar(up.index, up.Low - up.Open, width * 0.1, bottom=up.Open, color='green', alpha=0.5)
+    
+    ax1.bar(down.index, down.Open - down.Close, width, bottom=down.Close, color='red', alpha=0.5)
+    ax1.bar(down.index, down.High - down.Open, width * 0.1, bottom=down.Open, color='red', alpha=0.5)
+    ax1.bar(down.index, down.Low - down.Close, width * 0.1, bottom=down.Close, color='red', alpha=0.5)
+    
+    # Plot support and resistance points
+    ax1.scatter(support.index, support, marker='^', color='green', s=100, label='Support')
+    ax1.scatter(resistance.index, resistance, marker='v', color='red', s=100, label='Resistance')
+
+    # Add horizontal lines for support and resistance zones
+    for level in support:
+        ax1.axhline(y=level, color='green', linestyle='--', alpha=0.3)
+    for level in resistance:
+        ax1.axhline(y=level, color='red', linestyle='--', alpha=0.3)
+
+    # Plot volume in the second subplot
+    ax2.bar(data.index, data.Volume, color='blue', alpha=0.5)
+    ax2.set_ylabel('Volume')
+
+    # Format the date axis
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45)
+    plt.gcf().autofmt_xdate()
+
+    # Add grid, title, and labels
+    ax1.set_title(f"Support & Resistance Levels for {ticker}", fontsize=16)
+    ax1.set_ylabel('Price', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    ax2.grid(True, alpha=0.3)
+
+    # Format y-axis to show dollar values
+    ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'${x:.2f}'))
+
+    # Add legend
+    ax1.legend()
+
+    plt.tight_layout()
+    # Save the plot
+    plot_path = "support_resistance_plot.png"
+    plt.savefig(plot_path)
+    print(f"Plot saved as '{plot_path}'")
+    plt.close()
+
+    # Open the plot in Microsoft Edge
+    try:
+        edge_path = r'"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" %s'
+        webbrowser.get(edge_path).open(f"file://{os.path.abspath(plot_path)}")
+    except webbrowser.Error:
+        print("Microsoft Edge not found. Opening in the default browser...")
+        webbrowser.open(f"file://{os.path.abspath(plot_path)}")
+
+import yfinance as yf
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.signal import argrelextrema
+import matplotlib.dates as mdates
+from matplotlib.ticker import FuncFormatter
+import webbrowser
+import os
+
+def get_data(ticker, period="1y", interval="1d"):
+    """
+    Fetch historical data for the given ticker.
+    """
+    try:
+        data = yf.download(ticker, period=period, interval=interval, auto_adjust=False)
+        # Flatten multi-level column names if they exist
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+        return data
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+def create_dummy_data():
+    """
+    Create a dummy DataFrame for testing.
+    """
+    dates = pd.date_range(start="2024-01-01", end="2024-12-31", freq="B")  # Business days
+    data = pd.DataFrame({
+        "Open": np.random.uniform(100, 200, len(dates)),
+        "High": np.random.uniform(200, 300, len(dates)),
+        "Low": np.random.uniform(50, 100, len(dates)),
+        "Close": np.random.uniform(100, 200, len(dates)),
+        "Volume": np.random.randint(1000, 10000, len(dates))
+    }, index=dates)
+    return data
+
+def identify_support_resistance(df, window=10):
+    """
+    Identify support and resistance levels using local extrema.
+    """
+    prices = df["Close"].values.ravel()
+    local_min_idx = argrelextrema(prices, np.less, order=window)[0]
+    local_max_idx = argrelextrema(prices, np.greater, order=window)[0]
+    
+    support = pd.Series(prices[local_min_idx], index=df.index[local_min_idx])
+    resistance = pd.Series(prices[local_max_idx], index=df.index[local_max_idx])
+    
+    return support, resistance
+
+def trading_strategy(data, support, resistance):
+    """
+    Implement a trading strategy:
+    - Buy long at support and sell at resistance.
+    - Short at resistance and cover at support.
+    """
+    trades = []
+    position = None  # Track current position: "long", "short", or None
+
+    # Change iteritems() to items() - this is the fix for the error
+    for date, price in data["Close"].items():
+        if date in support.index:  # Buy long at support
+            if position is None:  # No active position
+                trades.append((date, "BUY LONG", price))
+                position = "long"
+            elif position == "short":  # Cover short at support
+                trades.append((date, "COVER SHORT", price))
+                position = None
+
+        if date in resistance.index:  # Short at resistance
+            if position is None:  # No active position
+                trades.append((date, "SHORT", price))
+                position = "short"
+            elif position == "long":  # Sell long at resistance
+                trades.append((date, "SELL LONG", price))
+                position = None
+
+    return trades
+
+def plot_support_resistance(data, support, resistance, ticker):
+    """
+    Plot the closing price along with detected support and resistance levels.
+    """
+    # Create figure and subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1]})
+    
+    # Calculate width for candlestick plot
+    width = 0.6
+    
+    # Create up and down DataFrames for price movement direction
+    up = data[data.Close >= data.Open]
+    down = data[data.Close < data.Open]
+    
+    # Plot candlesticks
+    ax1.bar(up.index, up.Close - up.Open, width, bottom=up.Open, color='green', alpha=0.5)
+    ax1.bar(up.index, up.High - up.Close, width * 0.1, bottom=up.Close, color='green', alpha=0.5)
+    ax1.bar(up.index, up.Low - up.Open, width * 0.1, bottom=up.Open, color='green', alpha=0.5)
+    
+    ax1.bar(down.index, down.Open - down.Close, width, bottom=down.Close, color='red', alpha=0.5)
+    ax1.bar(down.index, down.High - down.Open, width * 0.1, bottom=down.Open, color='red', alpha=0.5)
+    ax1.bar(down.index, down.Low - down.Close, width * 0.1, bottom=down.Close, color='red', alpha=0.5)
+    
+    # Plot support and resistance points
+    ax1.scatter(support.index, support, marker='^', color='green', s=100, label='Support')
+    ax1.scatter(resistance.index, resistance, marker='v', color='red', s=100, label='Resistance')
+
+    # Add horizontal lines for support and resistance zones
+    for level in support:
+        ax1.axhline(y=level, color='green', linestyle='--', alpha=0.3)
+    for level in resistance:
+        ax1.axhline(y=level, color='red', linestyle='--', alpha=0.3)
+
+    # Plot volume in the second subplot
+    ax2.bar(data.index, data.Volume, color='blue', alpha=0.5)
+    ax2.set_ylabel('Volume')
+
+    # Format the date axis
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45)
+    plt.gcf().autofmt_xdate()
+
+    # Add grid, title, and labels
+    ax1.set_title(f"Support & Resistance Levels for {ticker}", fontsize=16)
+    ax1.set_ylabel('Price', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    ax2.grid(True, alpha=0.3)
+
+    # Format y-axis to show dollar values
+    ax1.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f'${x:.2f}'))
+
+    # Add legend
+    ax1.legend()
+
+    plt.tight_layout()
+    # Save the plot
+    plot_path = "support_resistance_plot.png"
+    plt.savefig(plot_path)
+    print(f"Plot saved as '{plot_path}'")
+    plt.close()
+
+    # Open the plot in Microsoft Edge
+    try:
+        edge_path = r'"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" %s'
+        webbrowser.get(edge_path).open(f"file://{os.path.abspath(plot_path)}")
+    except webbrowser.Error:
+        print("Microsoft Edge not found. Opening in the default browser...")
+        webbrowser.open(f"file://{os.path.abspath(plot_path)}")
+
+def calculate_trade_statistics(trades):
+    """
+    Calculate statistics for long and short trades.
+    
+    Parameters:
+        trades (list): List of executed trades in the format (date, action, price).
+    
+    Returns:
+        dict: A dictionary containing statistics for long and short trades.
+    """
+    long_trades = []
+    short_trades = []
+    long_profit = 0
+    short_profit = 0
+    long_wins = 0
+    short_wins = 0
+    long_losses = 0
+    short_losses = 0
+    equity_curve = [0]  # Track cumulative profit/loss for max drawdown calculation
+
+    for i in range(len(trades) - 1):
+        action, next_action = trades[i][1], trades[i + 1][1]
+        price, next_price = trades[i][2], trades[i + 1][2]
+
+        if action == "BUY LONG" and next_action == "SELL LONG":
+            profit = next_price - price
+            long_trades.append((trades[i][0], trades[i + 1][0], price, next_price, profit))
+            long_profit += profit
+            equity_curve.append(equity_curve[-1] + profit)
+            if profit > 0:
+                long_wins += 1
+            else:
+                long_losses += 1
+
+        if action == "SHORT" and next_action == "COVER SHORT":
+            profit = price - next_price
+            short_trades.append((trades[i][0], trades[i + 1][0], price, next_price, profit))
+            short_profit += profit
+            equity_curve.append(equity_curve[-1] + profit)
+            if profit > 0:
+                short_wins += 1
+            else:
+                short_losses += 1
+
+    # Calculate max drawdown
+    equity_curve = pd.Series(equity_curve)
+    running_max = equity_curve.cummax()
+    drawdown = equity_curve - running_max
+    max_drawdown = drawdown.min()
+
+    # Calculate percentages
+    total_long_trades = len(long_trades)
+    total_short_trades = len(short_trades)
+    total_trades = total_long_trades + total_short_trades
+    long_win_pct = (long_wins / total_long_trades * 100) if total_long_trades > 0 else 0
+    short_win_pct = (short_wins / total_short_trades * 100) if total_short_trades > 0 else 0
+    long_loss_pct = (long_losses / total_long_trades * 100) if total_long_trades > 0 else 0
+    short_loss_pct = (short_losses / total_short_trades * 100) if total_short_trades > 0 else 0
+
+    return {
+        "long_trades": long_trades,
+        "short_trades": short_trades,
+        "long_profit": long_profit,
+        "short_profit": short_profit,
+        "total_long_trades": total_long_trades,
+        "total_short_trades": total_short_trades,
+        "long_win_pct": long_win_pct,
+        "short_win_pct": short_win_pct,
+        "long_loss_pct": long_loss_pct,
+        "short_loss_pct": short_loss_pct,
+        "max_drawdown": max_drawdown,
+    }
+
+if __name__ == "__main__":
+    # Define the ticker symbol for Microsoft
+    ticker = "MSFT"
+    
+    # Retrieve 1 year of daily data for MSFT
+    data = get_data(ticker, period="1y", interval="1d")
+    
+    # If data is None or not a DataFrame, create dummy data
+    if data is None or not isinstance(data, pd.DataFrame):
+        print("Creating dummy data for testing...")
+        data = create_dummy_data()
+    
+    print("Data head:")
+    print(data.head())
+    print(f"Data type: {type(data)}")  # Debug: Check the type of `data`
+    
+    # Ensure `data` has the required columns
+    required_columns = ["Open", "High", "Low", "Close", "Volume"]
+    if not all(col in data.columns for col in required_columns):
+        raise ValueError(f"The 'data' DataFrame must contain the following columns: {required_columns}")
+    
+    # Identify support and resistance levels using a window of 10 days
+    support, resistance = identify_support_resistance(data, window=10)
+    print("Identifying support and resistance levels...")
+    print(f"Support levels found: {len(support)}")
+    print(support)
+    print(f"Resistance levels found: {len(resistance)}")
+    print(resistance)
+    
+    # Execute the trading strategy
+    trades = trading_strategy(data, support, resistance)
+    print("\nExecuted Trades:")
+    for trade in trades:
+        print(trade)
+    
+    # Calculate trade statistics
+    stats = calculate_trade_statistics(trades)
+    print("\nTrade Statistics:")
+    print(f"Total Long Trades: {stats['total_long_trades']}")
+    print(f"Total Short Trades: {stats['total_short_trades']}")
+    print(f"Total Long Profit: ${stats['long_profit']:.2f}")
+    print(f"Total Short Profit: ${stats['short_profit']:.2f}")
+    print(f"Long Win Percentage: {stats['long_win_pct']:.2f}%")
+    print(f"Short Win Percentage: {stats['short_win_pct']:.2f}%")
+    print(f"Long Loss Percentage: {stats['long_loss_pct']:.2f}%")
+    print(f"Short Loss Percentage: {stats['short_loss_pct']:.2f}%")
+    print(f"Maximum Drawdown: ${stats['max_drawdown']:.2f}")
+    
+    # Plot the results
+    plot_support_resistance(data, support, resistance, ticker)
