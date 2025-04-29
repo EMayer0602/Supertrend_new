@@ -830,90 +830,8 @@ def plot_combined_charts(data, jurik_column, long_equity_curve, short_equity_cur
     fig.show()
 
 
-    """
-    Plot candlestick chart with Jurik SMA and equity curves in one window using Plotly.
-
-    Parameters:
-    - data: DataFrame containing OHLC data and Jurik SMA.
-    - jurik_column: Column name for the Jurik SMA.
-    - long_equity_curve: Pandas Series representing the long equity curve.
-    - short_equity_curve: Pandas Series representing the short equity curve.
-    """
-    # Create a subplot with 2 rows
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.1,
-        row_heights=[0.6, 0.4],  # Adjust the height ratio between the charts
-        subplot_titles=("Candlestick Chart with Jurik SMA", "Equity Curves")
-    )
-
-    # Add candlestick chart
-    fig.add_trace(
-        go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
-            name="Candlesticks",
-            increasing_line_color='green',  # Bullish candles are green
-            decreasing_line_color='red'    # Bearish candles are red
-        ),
-        row=1, col=1
-    )
-
-    # Add Jurik SMA
-    fig.add_trace(
-        go.Scatter(
-            x=data.index,
-            y=data[jurik_column],
-            mode='lines',
-            name='Jurik SMA (20)',
-            line=dict(color='blue', width=2)
-        ),
-        row=1, col=1
-    )
-
-    # Add long equity curve
-    fig.add_trace(
-        go.Scatter(
-            x=long_equity_curve.index,
-            y=long_equity_curve.values,
-            mode='lines',
-            name='Long Equity Curve',
-            line=dict(color='blue', width=2)
-        ),
-        row=2, col=1
-    )
-
-    # Add short equity curve
-    fig.add_trace(
-        go.Scatter(
-            x=short_equity_curve.index,
-            y=short_equity_curve.values,
-            mode='lines',
-            name='Short Equity Curve',
-            line=dict(color='red', width=2)
-        ),
-        row=2, col=1
-    )
-
-    # Update layout
-    fig.update_layout(
-        title="Candlestick Chart with Jurik SMA and Equity Curves",
-        xaxis_title="Date",
-        yaxis_title="Price",
-        xaxis2_title="Date",  # X-axis for the second chart
-        yaxis2_title="Equity",
-        template="plotly_white",
-        height=800,  # Adjust the height of the figure
-        xaxis_rangeslider_visible=False,  # Disable slider for the candlestick chart
-        xaxis2_rangeslider=dict(visible=True, thickness=0.05)  # Enable slider for the equity curves with minimal height
-    )
-
     # Open in browser
-    fig.show()
+#    fig.show()
 
 # Import the tabulate library
 from tabulate import tabulate
@@ -948,17 +866,18 @@ if __name__ == "__main__":
     print("\nMatched Long Trades:")
     for trade in long_trades:
         print(f"Action: {trade['Action']}, Date: {trade['Date']}, Price: {trade['Price']}, Shares: {trade['Shares']}, PnL: {trade['PnL']}")
-
+   # Print long trade statistics
+    print("\nLong Trade Statistics:")
+    long_stats_data = [[key, value] for key, value in long_stats.items()]
+    
+    print(tabulate(long_stats_data, tablefmt="plain"))
     print("\nMatched Short Trades:")
     for trade in short_trades:
         print(f"Action: {trade['Action']}, Date: {trade['Date']}, Price: {trade['Price']}, Shares: {trade['Shares']}, PnL: {trade['PnL']}")
 
     # Print total PnL for both long and short trades
 #    print(f"\nTotal Long PnL: {total_long_pnl}")
-        # Print long trade statistics
-    print("\nLong Trade Statistics:")
-    long_stats_data = [[key, value] for key, value in long_stats.items()]
-    print(tabulate(long_stats_data, tablefmt="plain"))
+
 #    print(f"Total Short PnL: {total_short_pnl}")
     # Print short trade statistics
     print("\nShort Trade Statistics:")
@@ -966,5 +885,5 @@ if __name__ == "__main__":
     print(tabulate(short_stats_data, tablefmt="plain"))    
 
     # Plot combined charts once
-    print("Calling plot_combined_charts...")
+#    print("Calling plot_combined_charts...")
     plot_combined_charts(data, 'Jurik_SMA_20', long_equity_curve, short_equity_curve)
