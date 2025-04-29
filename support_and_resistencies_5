@@ -920,64 +920,51 @@ from tabulate import tabulate
 
 # Main execution
 if __name__ == "__main__":
-    # Your existing code for data processing and calculations
-    # ...
-    
-    # Format and print long trades in a clean table format
-    print("\nLong Trades:")
-    if long_trades:
-        # Extract the relevant fields from each trade dictionary
-        long_table_data = []
-        for trade in long_trades:
-            # Format the date and numbers nicely
-            date_str = trade['Date'].strftime('%Y-%m-%d')
-            price = f"€{trade['Price']:,.2f}"
-            shares = f"{trade['Shares']:.2f}"
-            pnl = f"€{trade['PnL']:,.2f}" if trade['PnL'] != 0 else "—"
-            
-            long_table_data.append([trade['Action'], date_str, price, shares, pnl])
-        
-        # Print the table without frames
-        headers = ["Action", "Date", "Price", "Shares", "PnL"]
-        print(tabulate(long_table_data, headers=headers, tablefmt="plain"))
-    else:
-        print("No long trades found.")
-    
-    print(f"\nTotal Long PnL: €{total_long_pnl:,.2f}")
-    
-    # Print long trade statistics
+    # Get BTC data
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=365)
+    data = get_data("BTC-EUR", period="1y", interval="1d")
+    print(f"Start Date: {start_date}, End Date: {end_date}")
+
+    # Ensure data is not None
+    if data is None or data.empty:
+        print("Error: No data fetched. Please check the ticker symbol or internet connection.")
+        exit()
+
+    # Calculate Jurik SMA (20)
+    data['Jurik_SMA_20'] = jurik_sma(data['Close'], period=20)
+
+    # Identify support and resistance levels
+    support, resistance = identify_support_resistance(data, past_window=10, future_window=2)
+
+    # Combine support and resistance into a single DataFrame
+    combined_df = assign_signals(support, resistance, future_window=3)
+
+    # Translate combined_df into long and short trades
+    long_trades, total_long_pnl = translate_long_trades(combined_df, data)
+    short_trades, total_short_pnl = translate_short_trades(combined_df, data)
+
+    # Print matched trades for long and short
+    print("\nMatched Long Trades:")
+    for trade in long_trades:
+        print(f"Action: {trade['Action']}, Date: {trade['Date']}, Price: {trade['Price']}, Shares: {trade['Shares']}, PnL: {trade['PnL']}")
+
+    print("\nMatched Short Trades:")
+    for trade in short_trades:
+        print(f"Action: {trade['Action']}, Date: {trade['Date']}, Price: {trade['Price']}, Shares: {trade['Shares']}, PnL: {trade['PnL']}")
+
+    # Print total PnL for both long and short trades
+#    print(f"\nTotal Long PnL: {total_long_pnl}")
+        # Print long trade statistics
     print("\nLong Trade Statistics:")
     long_stats_data = [[key, value] for key, value in long_stats.items()]
     print(tabulate(long_stats_data, tablefmt="plain"))
-    
-    # Format and print short trades in a clean table format
-    print("\nShort Trades:")
-    if short_trades:
-        # Extract the relevant fields from each trade dictionary
-        short_table_data = []
-        for trade in short_trades:
-            # Format the date and numbers nicely
-            date_str = trade['Date'].strftime('%Y-%m-%d')
-            price = f"€{trade['Price']:,.2f}"
-            shares = f"{trade['Shares']:.2f}"
-            pnl = f"€{trade['PnL']:,.2f}" if trade['PnL'] != 0 else "—"
-            
-            short_table_data.append([trade['Action'], date_str, price, shares, pnl])
-        
-        # Print the table without frames
-        headers = ["Action", "Date", "Price", "Shares", "PnL"]
-        print(tabulate(short_table_data, headers=headers, tablefmt="plain"))
-    else:
-        print("No short trades found.")
-    
-    print(f"\nTotal Short PnL: €{total_short_pnl:,.2f}")
-    
+#    print(f"Total Short PnL: {total_short_pnl}")
     # Print short trade statistics
     print("\nShort Trade Statistics:")
     short_stats_data = [[key, value] for key, value in short_stats.items()]
-    print(tabulate(short_stats_data, tablefmt="plain"))
-    
+    print(tabulate(short_stats_data, tablefmt="plain"))    
 
-# Plot combined charts once
-print("Calling plot_combined_charts...")
-plot_combined_charts(data, 'Jurik_SMA_20', long_equity_curve, short_equity_curve)
+    # Plot combined charts once
+    print("Calling plot_combined_charts...")
+    plot_combined_charts(data, 'Jurik_SMA_20', long_equity_curve, short_equity_curve)
