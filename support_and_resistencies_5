@@ -12,13 +12,18 @@ from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates  # Import mdates for date formatting
 from mplfinance.original_flavor import candlestick_ohlc
-''''
-# Download BTC data
-def get_btc_data():
-    btc = yf.Ticker("BTC-EUR")
-    btc_data = btc.history(period="1y")
-    return btc_data
-'''
+
+# Clean up the DataFrame columns to have simple names
+def clean_dataframe_columns(df):
+    # Get the first level of the MultiIndex columns
+    new_columns = [col[0] for col in df.columns]
+    
+    # Create a new DataFrame with simplified column names
+    df_clean = df.copy()
+    df_clean.columns = new_columns
+    
+    return df_clean
+
 def get_data(ticker, period="1y", interval="1d"):
     """
     Fetch historical data for the given ticker.
@@ -29,6 +34,7 @@ def get_data(ticker, period="1y", interval="1d"):
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
         return data
+#        print(data)
     except Exception as e:
         print(f"Error fetching data: {e}")
         return None
@@ -753,6 +759,7 @@ def plot_combined_charts(data, jurik_column, long_equity_curve, short_equity_cur
     - long_equity_curve: Pandas Series representing the long equity curve.
     - short_equity_curve: Pandas Series representing the short equity curve.
     """
+    print("plot_combined_charts function called")
     # Create a subplot with 2 rows
     fig = make_subplots(
         rows=2, cols=1,
@@ -839,16 +846,38 @@ from tabulate import tabulate
 # Main execution
 if __name__ == "__main__":
     # Get BTC data
+#    end_date = datetime.now()
+#    start_date = end_date - timedelta(days=365)
+#    data = get_data("BTC-EUR", period="1y", interval="1d")
+#    print(f"Start Date: {start_date}, End Date: {end_date}")
+    stock_symbol ="BTC-EUR"
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365)
-    data = get_data("BTC-EUR", period="1y", interval="1d")
-    print(f"Start Date: {start_date}, End Date: {end_date}")
+    data = yf.download(stock_symbol, start=start_date, end=end_date)
+#    print("Available columns in stock_data:")
+#    print(data.columns)
+    # Flatten the DataFrame to handle MultiIndex columns
+#    data = flatten_dataframe(data)
+    # Apply the function to your data
+    data = clean_dataframe_columns(data)
+# Now you can use simple column names
+if data is not None:
+    if data.empty:
+        print("Error: No data fetched. Please check the ticker symbol or internet connection.")
+        exit()
+    
+    # Print first few rows to verify - now with simple column names
+#    print(data[['Open', 'Close']])
+#    print(data)
+    close_col = f'Close_{stock_symbol}'
+    high_col = f'High_{stock_symbol}'
+    low_col = f'Low_{stock_symbol}'
 
     # Ensure data is not None
     if data is None or data.empty:
         print("Error: No data fetched. Please check the ticker symbol or internet connection.")
         exit()
-
+#    print(data[['Open', 'Close']])  # Print first few rows to verify
     # Calculate Jurik SMA (20)
     data['Jurik_SMA_20'] = jurik_sma(data['Close'], period=20)
 
@@ -875,11 +904,6 @@ if __name__ == "__main__":
     for trade in short_trades:
         print(f"Action: {trade['Action']}, Date: {trade['Date']}, Price: {trade['Price']}, Shares: {trade['Shares']}, PnL: {trade['PnL']}")
 
-    # Print total PnL for both long and short trades
-#    print(f"\nTotal Long PnL: {total_long_pnl}")
-
-#    print(f"Total Short PnL: {total_short_pnl}")
-    # Print short trade statistics
     print("\nShort Trade Statistics:")
     short_stats_data = [[key, value] for key, value in short_stats.items()]
     print(tabulate(short_stats_data, tablefmt="plain"))    
