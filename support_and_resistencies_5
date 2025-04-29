@@ -1,0 +1,998 @@
+# Import necessary libraries
+
+import datetime
+from datetime import datetime, timedelta
+import pandas as pd
+import yfinance as yf
+import numpy as np
+from scipy.signal import argrelextrema
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+# Add this import at the top of your code
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates  # Import mdates for date formatting
+from mplfinance.original_flavor import candlestick_ohlc
+''''
+# Download BTC data
+def get_btc_data():
+    btc = yf.Ticker("BTC-EUR")
+    btc_data = btc.history(period="1y")
+    return btc_data
+'''
+def get_data(ticker, period="1y", interval="1d"):
+    """
+    Fetch historical data for the given ticker.
+    """
+    try:
+        data = yf.download(ticker, period=period, interval=interval, auto_adjust=False)
+        # Flatten multi-level column names if they exist
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+        return data
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+# Calculate Jurik SMA (20)
+def jurik_sma(series, period=20):
+    return series.rolling(window=period).mean()
+
+def round_to_multiple(value, multiple):
+    """Round a value to the nearest multiple of a given parameter."""
+    if multiple == 0 or multiple is None:
+        raise ValueError("The 'multiple' parameter must be greater than 0.")
+    return round(value / multiple) * multiple
+# Funktion zur Berechnung der Trades
+
+# Identify support and resistance levels
+from scipy.signal import argrelextrema
+
+def identify_support_resistance(df, past_window=10, future_window=3):
+    """
+    Identify support and resistance levels using local extrema with asymmetric windows.
+    
+    Parameters:
+    - df: DataFrame containing the price data.
+    - past_window: Number of days to look into the past for extrema.
+    - future_window: Number of days to look into the future for extrema.
+    
+    Returns:
+    - support: Series containing support levels.
+    - resistance: Series containing resistance levels.
+    """
+    prices = df["Close"].values.ravel()
+
+    # Identify local minima (support levels)
+    local_min_idx = argrelextrema(prices, np.less, order=past_window + future_window)[0]
+    support = pd.Series(prices[local_min_idx], index=df.index[local_min_idx])
+
+    # Identify local maxima (resistance levels)
+    local_max_idx = argrelextrema(prices, np.greater, order=past_window + future_window)[0]
+    resistance = pd.Series(prices[local_max_idx], index=df.index[local_max_idx])
+
+    return support, resistance
+
+def assign_signals(support, resistance, future_window=3):
+    """
+    Combine support and resistance levels and assign buy/sell and short/cover signals.
+
+    Parameters:
+    - support: Series containing support levels.
+    - resistance: Series containing resistance levels.
+    - future_window: Number of days to delay the signals.
+
+    Returns:
+    - combined_df: DataFrame with combined levels and assigned signals.
+    """
+    # Combine support and resistance levels
+    support_df = pd.DataFrame({'Date': support.index, 'Level': support.values, 'Type': 'support'})
+    resistance_df = pd.DataFrame({'Date': resistance.index, 'Level': resistance.values, 'Type': 'resistance'})
+    combined_df = pd.concat([support_df, resistance_df]).sort_values(by='Date').reset_index(drop=True)
+
+    # Initialize columns for signals
+    combined_df['Long'] = None
+    combined_df['Long Date'] = None
+    combined_df['Short'] = None
+    combined_df['Short Date'] = None
+
+    # Track the state of long and short positions
+    long_active = False
+    short_active = False
+
+    for i, row in combined_df.iterrows():
+        future_date = row['Date'] + pd.Timedelta(days=future_window)  # Add future_window days
+
+        # Assign long trades
+        if row['Type'] == 'support' and not long_active:
+            combined_df.at[i, 'Long'] = 'buy'
+            combined_df.at[i, 'Long Date'] = future_date
+            long_active = True
+        elif row['Type'] == 'resistance' and long_active:
+            combined_df.at[i, 'Long'] = 'sell'
+            combined_df.at[i, 'Long Date'] = future_date
+            long_active = False
+
+        # Assign short trades
+        if row['Type'] == 'resistance' and not short_active:
+            combined_df.at[i, 'Short'] = 'short'
+            combined_df.at[i, 'Short Date'] = future_date
+            short_active = True
+        elif row['Type'] == 'support' and short_active:
+            combined_df.at[i, 'Short'] = 'cover'
+            combined_df.at[i, 'Short Date'] = future_date
+            short_active = False
+
+    return combined_df
+
+def assign_long_trades(data, future_window=3):
+    """
+    Assign long trades based on support and resistance levels.
+
+    Parameters:
+    - data: DataFrame containing sorted support and resistance levels.
+    - future_window: Number of days to delay the trades.
+
+    Returns:
+    - data: DataFrame with assigned long trades and future dates.
+    """
+    # Initialize columns for signals
+    data['Long'] = None
+    data['Long Date'] = None
+
+    # Track the state of the long position
+    long_active = False
+
+    for i, row in data.iterrows():
+        if row['Type'] == 'support' and not long_active:
+            # Assign a buy signal
+            data.at[i, 'Long'] = 'buy'
+            data.at[i, 'Long Date'] = row['Date'] + pd.Timedelta(days=future_window)
+            long_active = True
+        elif row['Type'] == 'resistance' and long_active:
+            # Assign a sell signal
+            data.at[i, 'Long'] = 'sell'
+            data.at[i, 'Long Date'] = row['Date'] + pd.Timedelta(days=future_window)
+            long_active = False
+
+    return data
+def translate_long_trades(combined_df, data, initial_capital=100000, share_rounding=0.01):
+    """
+    Translate combined_df into long trades and calculate PnLs.
+
+    Parameters:
+    - combined_df: DataFrame containing support and resistance levels with signals.
+    - data: DataFrame containing the price data (must include 'Close').
+    - initial_capital: Starting capital for the strategy.
+    - share_rounding: Rounding precision for shares.
+
+    Returns:
+    - long_trades: List of long trades with PnLs.
+    - total_long_pnl: Total profit or loss from long trades.
+    """
+    long_trades = []
+    long_active = False
+    total_long_pnl = 0
+    position_price = None
+    shares_long = None
+
+    for i, row in combined_df.iterrows():
+        # Use the price from the future window date (Long Date)
+        trade_date = row['Long Date']
+        if trade_date in data.index:
+            if row['Long'] == 'buy' and not long_active:
+                position_price = data.loc[trade_date, 'Close']
+                shares_long = round(initial_capital / position_price, 2)  # Calculate shares
+                long_trades.append({
+                    'Action': 'BUY',
+                    'Date': trade_date,
+                    'Price': position_price,
+                    'Shares': shares_long,
+                    'PnL': 0
+                })
+                long_active = True
+            elif row['Long'] == 'sell' and long_active:
+                sell_price = data.loc[trade_date, 'Close']
+                pnl = shares_long * (sell_price - position_price)  # Calculate PnL
+                total_long_pnl += pnl
+                long_trades.append({
+                    'Action': 'SELL',
+                    'Date': trade_date,
+                    'Price': sell_price,
+                    'Shares': shares_long,
+                    'PnL': pnl
+                })
+                long_active = False
+
+    return long_trades, total_long_pnl
+
+def translate_short_trades(combined_df, data, initial_capital=100000, share_rounding=0.01):
+    """
+    Translate combined_df into short trades and calculate PnLs.
+
+    Parameters:
+    - combined_df: DataFrame containing support and resistance levels with signals.
+    - data: DataFrame containing the price data (must include 'Close').
+    - initial_capital: Starting capital for the strategy.
+    - share_rounding: Rounding precision for shares.
+
+    Returns:
+    - short_trades: List of short trades with PnLs.
+    - total_short_pnl: Total profit or loss from short trades.
+    """
+    short_trades = []
+    short_active = False
+    total_short_pnl = 0
+    position_price = None
+    shares_short = None
+
+    for i, row in combined_df.iterrows():
+        # Use the price from the future window date (Short Date)
+        trade_date = row['Short Date']
+        if trade_date in data.index:
+            if row['Short'] == 'short' and not short_active:
+                position_price = data.loc[trade_date, 'Close']
+                shares_short = round(initial_capital / position_price, 2)  # Calculate shares
+                short_trades.append({
+                    'Action': 'SHORT',
+                    'Date': trade_date,
+                    'Price': position_price,
+                    'Shares': shares_short,
+                    'PnL': 0
+                })
+                short_active = True
+            elif row['Short'] == 'cover' and short_active:
+                cover_price = data.loc[trade_date, 'Close']
+                pnl = shares_short * (position_price - cover_price)  # Calculate PnL
+                total_short_pnl += pnl
+                short_trades.append({
+                    'Action': 'COVER',
+                    'Date': trade_date,
+                    'Price': cover_price,
+                    'Shares': shares_short,
+                    'PnL': pnl
+                })
+                short_active = False
+
+    return short_trades, total_short_pnl
+
+    """
+    Translate combined_df into short trades and calculate PnLs.
+
+    Parameters:
+    - combined_df: DataFrame containing support and resistance levels with signals.
+    - data: DataFrame containing the price data (must include 'Close').
+    - initial_capital: Starting capital for the strategy.
+    - share_rounding: Rounding precision for shares.
+
+    Returns:
+    - short_trades: List of short trades with PnLs.
+    - total_short_pnl: Total profit or loss from short trades.
+    """
+    short_trades = []
+    short_active = False
+    total_short_pnl = 0
+    position_price = None
+    shares_short = None
+
+    for i, row in combined_df.iterrows():
+        if row['Short'] == 'short' and not short_active:
+            # Use the price from the future window date (Short Date)
+            trade_date = row['Short Date']
+            if trade_date in data.index:
+                position_price = data.loc[trade_date, 'Close']
+                shares_short = round(initial_capital / position_price, 2)  # Calculate shares
+                short_trades.append({
+                    'Action': 'SHORT',
+                    'Date': trade_date,
+                    'Price': position_price,
+                    'Shares': shares_short,
+                    'PnL': 0
+                })
+                short_active = True
+        elif row['Short'] == 'cover' and short_active:
+            # Use the price from the future window date (Short Date)
+            trade_date = row['Short Date']
+            if trade_date in data.index:
+                cover_price = data.loc[trade_date, 'Close']
+                pnl = shares_short * (position_price - cover_price)  # Calculate PnL
+                total_short_pnl += pnl
+                short_trades.append({
+                    'Action': 'COVER',
+                    'Date': trade_date,
+                    'Price': cover_price,
+                    'Shares': shares_short,
+                    'PnL': pnl
+                })
+                short_active = False
+
+    return short_trades, total_short_pnl
+
+def translate_to_trades(combined_df):
+    """
+    Translate the combined_df into long and short trades.
+
+    Parameters:
+    - combined_df: DataFrame containing support and resistance levels with signals.
+
+    Returns:
+    - long_trades: List of long trades (buy/sell pairs).
+    - short_trades: List of short trades (short/cover pairs).
+    """
+    long_trades = []
+    short_trades = []
+    long_active = False
+    short_active = False
+    last_buy_price = None
+    last_short_price = None
+
+    for i, row in combined_df.iterrows():
+        if row['Signal'] == 'buy' and not long_active:
+            # Start a long trade
+            long_trades.append({'Action': 'BUY', 'Date': row['Future Date'], 'Price': row['Level']})
+            long_active = True
+            last_buy_price = row['Level']
+        elif row['Signal'] == 'sell' and long_active:
+            # Close the long trade
+            long_trades.append({'Action': 'SELL', 'Date': row['Future Date'], 'Price': row['Level']})
+            long_active = False
+
+        if row['Signal'] == 'short' and not short_active:
+            # Start a short trade
+            short_trades.append({'Action': 'SHORT', 'Date': row['Future Date'], 'Price': row['Level']})
+            short_active = True
+            last_short_price = row['Level']
+        elif row['Signal'] == 'cover' and short_active:
+            # Close the short trade
+            short_trades.append({'Action': 'COVER', 'Date': row['Future Date'], 'Price': row['Level']})
+            short_active = False
+
+    return long_trades, short_trades
+
+def calculate_short_trades_and_pnl(combined_df, initial_capital=100000, share_rounding=0.01):
+    """
+    Match short trades and calculate PnLs.
+
+    Parameters:
+    - combined_df: DataFrame containing support and resistance levels with signals.
+    - initial_capital: Starting capital for the strategy.
+    - share_rounding: Rounding precision for shares.
+
+    Returns:
+    - short_trades: List of short trades with PnLs.
+    - total_short_pnl: Total profit or loss from short trades.
+    """
+    short_trades = []
+    short_active = False
+    total_short_pnl = 0
+    position_price = None
+    shares_short = None
+
+    for i, row in combined_df.iterrows():
+        if row['Signal'] == 'short' and not short_active:
+            # Open a short position
+            position_price = row['Level']
+            shares_short = round(initial_capital / position_price, 2)  # Calculate shares
+            short_trades.append({'Action': 'SHORT', 'Date': row['Future Date'], 'Price': position_price, 'Shares': shares_short, 'PnL': 0})
+            short_active = True
+        elif row['Signal'] == 'cover' and short_active:
+            # Close the short position
+            cover_price = row['Level']
+            pnl = shares_short * (position_price - cover_price)  # Calculate PnL
+            total_short_pnl += pnl
+            short_trades.append({'Action': 'COVER', 'Date': row['Future Date'], 'Price': cover_price, 'Shares': shares_short, 'PnL': pnl})
+            short_active = False
+
+    return short_trades, total_short_pnl
+
+# Long trading strategy
+def long_trading_strategy(data, support, initial_capital=100000, share_rounding=0.01, future_window=3):
+    long_trades = []
+    position = None
+    total_long_profit = 0
+    long_equity_curve = pd.Series(index=data.index, dtype=float)
+    current_equity = initial_capital
+
+    for date, price in data["Close"].items():
+        if date in support.index and position is None:
+            delayed_date = date + pd.Timedelta(days=future_window)
+            if delayed_date in data.index:
+                shares_long = round(current_equity / data.loc[delayed_date, "Close"], 2)
+                long_trades.append((delayed_date, "BUY LONG", data.loc[delayed_date, "Close"], shares_long, 0))
+                position = "long"
+                position_price = data.loc[delayed_date, "Close"]
+
+        if date in support.index and position == "long":
+            delayed_date = date + pd.Timedelta(days=future_window)
+            if delayed_date in data.index:
+                shares_long = round(current_equity / position_price, 2)
+                profit = shares_long * (data.loc[delayed_date, "Close"] - position_price)
+                total_long_profit += profit
+                current_equity += profit
+                long_equity_curve[delayed_date] = current_equity
+                long_trades.append((delayed_date, "SELL LONG", data.loc[delayed_date, "Close"], shares_long, profit))
+                position = None
+
+    long_equity_curve.ffill(inplace=True)
+    return long_trades, total_long_profit, long_equity_curve
+
+# Short trading strategy
+def short_trading_strategy(data, resistance, initial_capital=100000, share_rounding=0.01, future_window=3):
+    short_trades = []
+    position = None
+    total_short_profit = 0
+    short_equity_curve = pd.Series(index=data.index, dtype=float)
+    current_equity = initial_capital
+
+    for date, price in data["Close"].items():
+        if date in resistance.index and position is None:
+            delayed_date = date + pd.Timedelta(days=future_window)
+            if delayed_date in data.index:
+                shares_short = round(current_equity / data.loc[delayed_date, "Close"], 2)
+                short_trades.append((delayed_date, "SHORT", data.loc[delayed_date, "Close"], shares_short, 0))
+                position = "short"
+                position_price = data.loc[delayed_date, "Close"]
+
+        if date in resistance.index and position == "short":
+            delayed_date = date + pd.Timedelta(days=future_window)
+            if delayed_date in data.index:
+                shares_short = round(current_equity / position_price, 2)
+                profit = shares_short * (position_price - data.loc[delayed_date, "Close"])
+                total_short_profit += profit
+                current_equity += profit
+                short_equity_curve[delayed_date] = current_equity
+                short_trades.append((delayed_date, "COVER SHORT", data.loc[delayed_date, "Close"], shares_short, profit))
+                position = None
+
+    short_equity_curve.ffill(inplace=True)
+    return short_trades, total_short_profit, short_equity_curve
+
+
+def calculate_trade_statistics(trades, equity_curve, initial_capital):
+    """
+    Calculate trade statistics from a list of trades and equity curve.
+
+    Parameters:
+    - trades: List of trades with PnLs.
+    - equity_curve: Pandas Series representing the equity curve over time.
+    - initial_capital: Starting capital for the strategy.
+
+    Returns:
+    - stats: Dictionary containing trade statistics.
+    """
+    total_trades = len(trades) // 2  # Each trade has a pair (entry and exit)
+    winning_trades = sum(1 for trade in trades if trade['PnL'] > 0)
+    losing_trades = total_trades - winning_trades
+    total_pnl = sum(trade['PnL'] for trade in trades)
+    win_percentage = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+    loss_percentage = (losing_trades / total_trades) * 100 if total_trades > 0 else 0
+
+    # Calculate Max Drawdown
+    peak = equity_curve.cummax()
+    drawdown = (peak - equity_curve) / peak
+    max_drawdown = drawdown.max()
+
+    stats = {
+        "Total Trades": total_trades,
+        "Winning Trades": winning_trades,
+        "Losing Trades": losing_trades,
+        "Win Percentage": win_percentage,
+        "Loss Percentage": loss_percentage,
+        "Total PnL": total_pnl,
+        "Final Capital": initial_capital + total_pnl,
+        "Max Drawdown": max_drawdown * 100  # Convert to percentage
+    }
+    return stats
+
+def calculate_equity_curve(df, trades, initial_capital, start_date):
+    """
+    Calculate the equity curve based on trades and close prices.
+
+    Parameters:
+    - df: DataFrame containing the price data (must include 'Close').
+    - trades: List of trades with entry and exit dates.
+    - initial_capital: Starting capital for the strategy.
+    - start_date: The date from which to start calculating the equity curve.
+
+    Returns:
+    - equity_curve: Pandas Series representing the equity curve over time.
+    """
+    if not trades:
+        return pd.Series(initial_capital, index=df.index)
+
+    # Initialize the equity curve
+    equity_curve = pd.Series(initial_capital, index=df.index, dtype=float)
+    current_capital = initial_capital
+    current_position = None
+    shares = 0
+
+    start_date = pd.Timestamp(start_date)  # Convert start_date to Timestamp
+
+    for i, date in enumerate(df.index):
+        if date < start_date:
+            equity_curve.loc[date] = initial_capital
+            continue
+
+        # Update equity based on the current position
+        if current_position:
+            current_price = df.loc[date, "Close"]
+            previous_price = df.loc[df.index[i - 1], "Close"] if i > 0 else current_price
+
+            if current_position["type"] == "Long":
+                # Update equity for long position
+                current_capital += shares * (current_price - previous_price)
+            elif current_position["type"] == "Short":
+                # Update equity for short position
+                current_capital += shares * (previous_price - current_price)
+
+            equity_curve.loc[date] = current_capital
+        else:
+            equity_curve.loc[date] = current_capital
+
+        # Check if a trade occurs on this date
+        for trade in trades:
+            if pd.Timestamp(date) == pd.Timestamp(trade["Date"]):
+                if trade["Action"] in ["BUY", "SHORT"]:
+                    # Open a position
+                    shares = trade["Shares"]
+                    current_position = {
+                        "entry_date": trade["Date"],
+                        "entry_capital": current_capital,
+                        "type": "Long" if trade["Action"] == "BUY" else "Short",
+                    }
+                elif trade["Action"] in ["SELL", "COVER"] and current_position:
+                    # Close the position
+                    current_position = None
+                    shares = 0
+
+    # Fill forward any missing values in the equity curve
+    equity_curve.ffill(inplace=True)
+
+    return equity_curve
+
+def _add_equity_curve(fig, equity_curve, name, color, row, col):
+    """
+    Add an equity curve to a Plotly figure.
+
+    Parameters:
+    - fig: Plotly figure object.
+    - equity_curve: Pandas Series representing the equity curve.
+    - name: Name of the equity curve (for the legend).
+    - color: Line color for the equity curve.
+    - row: Row in the subplot where the curve will be added.
+    - col: Column in the subplot where the curve will be added.
+    """
+    fig.add_trace(
+        go.Scatter(
+            x=equity_curve.index,
+            y=equity_curve.values,
+            name=name,
+            line=dict(color=color)
+        ),
+        row=row, col=col
+    )
+
+
+
+
+def generate_equity_curve(trades, initial_capital):
+    """
+    Generate an equity curve from a list of trades.
+
+    Parameters:
+    - trades: List of trades with PnLs.
+    - initial_capital: Starting capital for the strategy.
+
+    Returns:
+    - equity_curve: Pandas Series representing the equity curve over time.
+    """
+    equity = initial_capital
+    equity_curve = {}
+
+    for trade in trades:
+        equity += trade['PnL']
+        equity_curve[trade['Date']] = equity
+
+    return pd.Series(equity_curve).sort_index()
+
+def plot_candlesticks_with_jurik_plotly(data, jurik_column='Jurik_SMA_20'):
+    """
+    Plot candlestick chart with Jurik SMA using Plotly.
+
+    Parameters:
+    - data: DataFrame containing OHLC data and Jurik SMA.
+    - jurik_column: Column name for the Jurik SMA.
+    """
+    fig = make_subplots(rows=1, cols=1, shared_xaxes=True, vertical_spacing=0.02)
+
+    # Add candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name="Candlesticks",
+            increasing_line_color='green',
+            decreasing_line_color='red'
+        ),
+        row=1, col=1
+    )
+
+    # Add Jurik SMA
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data[jurik_column],
+            mode='lines',
+            name='Jurik SMA (20)',
+            line=dict(color='blue', width=2)
+        ),
+        row=1, col=1
+    )
+
+    # Update layout
+    fig.update_layout(
+        title="Candlestick Chart with Jurik SMA",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False,
+        template="plotly_dark"
+    )
+
+    # Open in browser
+    fig.show()
+
+def plot_equity_curves_plotly(long_equity_curve, short_equity_curve):
+    """
+    Plot equity curves for long and short trades using Plotly.
+
+    Parameters:
+    - long_equity_curve: Pandas Series representing the long equity curve.
+    - short_equity_curve: Pandas Series representing the short equity curve.
+    """
+    fig = go.Figure()
+
+    # Add long equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=long_equity_curve.index,
+            y=long_equity_curve.values,
+            mode='lines',
+            name='Long Equity Curve',
+            line=dict(color='blue', width=2)
+        )
+    )
+
+    # Add short equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=short_equity_curve.index,
+            y=short_equity_curve.values,
+            mode='lines',
+            name='Short Equity Curve',
+            line=dict(color='red', width=2)
+        )
+    )
+
+    # Update layout
+    fig.update_layout(
+        title="Equity Curves",
+        xaxis_title="Date",
+        yaxis_title="Equity",
+        template="plotly_dark"
+    )
+
+    # Open in browser
+    fig.show()
+
+
+def plot_candlesticks_with_jurik(data, jurik_column='Jurik_SMA_20'):
+    """
+    Plot candlestick chart with Jurik SMA.
+
+    Parameters:
+    - data: DataFrame containing OHLC data and Jurik SMA.
+    - jurik_column: Column name for the Jurik SMA.
+    """
+    # Prepare data for candlestick chart
+    ohlc_data = data[['Open', 'High', 'Low', 'Close']].copy()
+    ohlc_data['Date'] = data.index
+    ohlc_data['Date'] = mdates.date2num(ohlc_data['Date'])
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    candlestick_ohlc(ax, ohlc_data[['Date', 'Open', 'High', 'Low', 'Close']].values, width=0.6, colorup='green', colordown='red')
+
+    # Plot Jurik SMA
+    ax.plot(data.index, data[jurik_column], label='Jurik SMA (20)', color='blue', linewidth=1.5)
+
+    # Format the x-axis
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    plt.xticks(rotation=45)
+
+    # Add labels, legend, and grid
+    ax.set_title('Candlestick Chart with Jurik SMA')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Price')
+    ax.legend()
+    ax.grid()
+
+    plt.tight_layout()
+    plt.show()
+    
+def plot_equity_curves(long_equity_curve, short_equity_curve):
+    """
+    Plot equity curves for long and short trades.
+
+    Parameters:
+    - long_equity_curve: Pandas Series representing the long equity curve.
+    - short_equity_curve: Pandas Series representing the short equity curve.
+    """
+    plt.figure(figsize=(12, 6))
+    plt.plot(long_equity_curve, label="Long Equity Curve", color="blue", linewidth=1.5)
+    plt.plot(short_equity_curve, label="Short Equity Curve", color="red", linewidth=1.5)
+    plt.title("Equity Curves")
+    plt.xlabel("Date")
+    plt.ylabel("Equity")
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.show()
+import plotly.io as pio
+pio.renderers.default = 'browser'
+
+def plot_combined_charts(data, jurik_column, long_equity_curve, short_equity_curve):
+    """
+    Plot candlestick chart with Jurik SMA and equity curves in one window using Plotly.
+
+    Parameters:
+    - data: DataFrame containing OHLC data and Jurik SMA.
+    - jurik_column: Column name for the Jurik SMA.
+    - long_equity_curve: Pandas Series representing the long equity curve.
+    - short_equity_curve: Pandas Series representing the short equity curve.
+    """
+    # Create a subplot with 2 rows
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        row_heights=[0.6, 0.4],  # Adjust the height ratio between the charts
+        subplot_titles=("Candlestick Chart with Jurik SMA", "Equity Curves")
+    )
+
+    # Add candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name="Candlesticks",
+            increasing_line_color='green',  # Bullish candles are green
+            decreasing_line_color='red'    # Bearish candles are red
+        ),
+        row=1, col=1
+    )
+
+    # Add Jurik SMA
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data[jurik_column],
+            mode='lines',
+            name='Jurik SMA (20)',
+            line=dict(color='blue', width=2)
+        ),
+        row=1, col=1
+    )
+
+    # Add long equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=long_equity_curve.index,
+            y=long_equity_curve.values,
+            mode='lines',
+            name='Long Equity Curve',
+            line=dict(color='blue', width=2)
+        ),
+        row=2, col=1
+    )
+
+    # Add short equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=short_equity_curve.index,
+            y=short_equity_curve.values,
+            mode='lines',
+            name='Short Equity Curve',
+            line=dict(color='red', width=2)
+        ),
+        row=2, col=1
+    )
+
+    # Update layout
+    fig.update_layout(
+        title="Candlestick Chart with Jurik SMA and Equity Curves",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis2_title="Date",  # X-axis for the second chart
+        yaxis2_title="Equity",
+        template="plotly_white",
+        height=800,  # Adjust the height of the figure
+        xaxis_rangeslider_visible=False,  # Disable slider for the candlestick chart
+        xaxis2_rangeslider=dict(visible=True, thickness=0.05)  # Enable slider for the equity curves with minimal height
+    )
+
+    # Open in browser
+    fig.show()
+
+
+    """
+    Plot candlestick chart with Jurik SMA and equity curves in one window using Plotly.
+
+    Parameters:
+    - data: DataFrame containing OHLC data and Jurik SMA.
+    - jurik_column: Column name for the Jurik SMA.
+    - long_equity_curve: Pandas Series representing the long equity curve.
+    - short_equity_curve: Pandas Series representing the short equity curve.
+    """
+    # Create a subplot with 2 rows
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        row_heights=[0.6, 0.4],  # Adjust the height ratio between the charts
+        subplot_titles=("Candlestick Chart with Jurik SMA", "Equity Curves")
+    )
+
+    # Add candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name="Candlesticks",
+            increasing_line_color='green',  # Bullish candles are green
+            decreasing_line_color='red'    # Bearish candles are red
+        ),
+        row=1, col=1
+    )
+
+    # Add Jurik SMA
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data[jurik_column],
+            mode='lines',
+            name='Jurik SMA (20)',
+            line=dict(color='blue', width=2)
+        ),
+        row=1, col=1
+    )
+
+    # Add long equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=long_equity_curve.index,
+            y=long_equity_curve.values,
+            mode='lines',
+            name='Long Equity Curve',
+            line=dict(color='blue', width=2)
+        ),
+        row=2, col=1
+    )
+
+    # Add short equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=short_equity_curve.index,
+            y=short_equity_curve.values,
+            mode='lines',
+            name='Short Equity Curve',
+            line=dict(color='red', width=2)
+        ),
+        row=2, col=1
+    )
+
+    # Update layout
+    fig.update_layout(
+        title="Candlestick Chart with Jurik SMA and Equity Curves",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis2_title="Date",  # X-axis for the second chart
+        yaxis2_title="Equity",
+        template="plotly_white",
+        height=800,  # Adjust the height of the figure
+        xaxis_rangeslider_visible=False,  # Disable slider for the candlestick chart
+        xaxis2_rangeslider=dict(visible=True, thickness=0.05)  # Enable slider for the equity curves with minimal height
+    )
+
+    # Open in browser
+    fig.show()
+
+# Main execution
+if __name__ == "__main__":
+    # Get BTC data
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=365)
+    data = get_data("BTC-EUR", period="1y", interval="1d")
+    print(f"Start Date: {start_date}, End Date: {end_date}")
+#    data = yf.download("MSFT", start_date, end_date, interval="1d")
+    # Ensure data is not None
+    if data is None or data.empty:
+        print("Error: No data fetched. Please check the ticker symbol or internet connection.")
+        exit()
+#    print(data.index)
+    pd.reset_option('display.max_rows')
+    pd.set_option('display.max_rows', None)  # Show all rows
+#    print("\nComplete data")
+#    print(data)
+    # Calculate Jurik SMA (20)
+    data['Jurik_SMA_20'] = jurik_sma(data['Close'], period=20)
+
+    # Identify support and resistance levels
+    support, resistance = identify_support_resistance(data, past_window=10, future_window=2)
+
+    # Combine support and resistance into a single DataFrame
+    combined_df = assign_signals(support, resistance, future_window=3)
+
+    # Translate combined_df into long and short trades
+    long_trades, total_long_pnl = translate_long_trades(combined_df, data)
+    short_trades, total_short_pnl = translate_short_trades(combined_df, data)
+
+    # Calculate equity curves
+    initial_capital = 100000
+#    start_date = data.index[0]
+    # Calculate equity curves
+    long_equity_curve = calculate_equity_curve(data, long_trades, initial_capital, start_date)
+    short_equity_curve = calculate_equity_curve(data, short_trades, initial_capital, start_date)
+
+    # Print complete equity curves
+    print("\nComplete Long Equity Curve:")
+#    print(long_equity_curve.to_string())
+
+    print("\nComplete Short Equity Curve:")
+#    print(short_equity_curve.to_string())
+    # Display results
+'''
+    print("\nLong Trades:")
+    for trade in long_trades:
+        print(trade)
+'''
+#    print(f"\nTotal Long PnL: {total_long_pnl}")
+#    print("\nShort Trades:")
+#    for trade in short_trades:
+#    print(trade)
+
+print(f"\nTotal Long PnL: {total_long_pnl}")
+# Display results
+print("\nLong Trades:")
+for trade in long_trades:
+    print(trade)
+print(f"\nTotal Long PnL: {total_long_pnl}")
+print("\nLong Trade Statistics:")
+# Fixed: Calculate and display statistics instead of iterating through trades again
+# Assuming you have a function or dictionary with trade statistics
+long_stats = calculate_trade_statistics(long_trades,long_equity_curve,initial_capital)  # You need to implement this function
+for key, value in long_stats.items():
+    print(f"{key}: {value}")
+
+print("\nShort Trades:")
+for trade in short_trades:
+    print(trade)
+
+print(f"\nTotal Short PnL: {total_short_pnl}")
+print("\nShort Trade Statistics:")
+# Fixed: Calculate and display statistics instead of iterating through trades again
+short_stats = calculate_trade_statistics(short_trades,short_equity_curve,initial_capital)  # You need to implement this function
+for key, value in short_stats.items():
+    print(f"{key}: {value}")
+
+
+    # Plot combined charts
+    plot_combined_charts(data, 'Jurik_SMA_20', long_equity_curve, short_equity_curve)
