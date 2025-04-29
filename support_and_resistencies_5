@@ -720,7 +720,7 @@ def plot_candlesticks_with_jurik(data, jurik_column='Jurik_SMA_20'):
     ax.grid()
 
     plt.tight_layout()
-    plt.show()
+#    plt.show()
     
 def plot_equity_curves(long_equity_curve, short_equity_curve):
     """
@@ -739,9 +739,9 @@ def plot_equity_curves(long_equity_curve, short_equity_curve):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.show()
-import plotly.io as pio
-pio.renderers.default = 'browser'
+#    plt.show()
+#import plotly.io as pio
+#pio.renderers.default = 'browser'
 
 def plot_combined_charts(data, jurik_column, long_equity_curve, short_equity_curve):
     """
@@ -972,27 +972,26 @@ if __name__ == "__main__":
 print(f"\nTotal Long PnL: {total_long_pnl}")
 # Display results
 print("\nLong Trades:")
-for trade in long_trades:
-    print(trade)
-print(f"\nTotal Long PnL: {total_long_pnl}")
-print("\nLong Trade Statistics:")
-# Fixed: Calculate and display statistics instead of iterating through trades again
-# Assuming you have a function or dictionary with trade statistics
-long_stats = calculate_trade_statistics(long_trades,long_equity_curve,initial_capital)  # You need to implement this function
-for key, value in long_stats.items():
-    print(f"{key}: {value}")
+#for trade in long_trades:
+print(long_trades)
 
 print("\nShort Trades:")
-for trade in short_trades:
-    print(trade)
+#for trade in short_trades:
+print(short_trades)
 
+# Display results
 print(f"\nTotal Short PnL: {total_short_pnl}")
 print("\nShort Trade Statistics:")
-# Fixed: Calculate and display statistics instead of iterating through trades again
-short_stats = calculate_trade_statistics(short_trades,short_equity_curve,initial_capital)  # You need to implement this function
+short_stats = calculate_trade_statistics(short_trades, short_equity_curve, initial_capital)
 for key, value in short_stats.items():
     print(f"{key}: {value}")
 
+print(f"\nTotal Long PnL: {total_long_pnl}")
+print("\nLong Trade Statistics:")
+long_stats = calculate_trade_statistics(long_trades, long_equity_curve, initial_capital)
+for key, value in long_stats.items():
+    print(f"{key}: {value}")
 
-    # Plot combined charts
-    plot_combined_charts(data, 'Jurik_SMA_20', long_equity_curve, short_equity_curve)
+# Plot combined charts once
+print("Calling plot_combined_charts...")
+plot_combined_charts(data, 'Jurik_SMA_20', long_equity_curve, short_equity_curve)
